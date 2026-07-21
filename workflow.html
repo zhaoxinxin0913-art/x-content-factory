@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1400,initial-scale=1">
+<title>X博主内容抓取工作流</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#020617;color:#e2e8f0;font-family:'JetBrains Mono',monospace;padding:40px}
+h1{font-size:28px;text-align:center;margin-bottom:8px;color:#fff}
+.sub{text-align:center;color:#64748b;font-size:14px;margin-bottom:40px}
+.diagram{border:1px solid #1e293b;border-radius:12px;background:#0f172a;padding:40px 20px;display:flex;justify-content:center;overflow-x:auto}
+.footer{text-align:center;color:#475569;font-size:12px;margin-top:30px}
+.section{margin-top:50px}
+.section h2{font-size:20px;color:#22d3ee;margin-bottom:20px;border-bottom:1px solid #1e293b;padding-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.card{background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:24px}
+.card h3{font-size:16px;margin-bottom:12px}
+.card .cyan{color:#22d3ee}.card .green{color:#34d399}.card .amber{color:#fbbf24}.card .rose{color:#fb7185}.card .violet{color:#a78bfa}
+.card p,.card li{font-size:13px;line-height:1.7;color:#94a3b8}
+.card code{background:#1e293b;padding:2px 8px;border-radius:4px;font-size:12px;color:#fbbf24}
+.card ul{padding-left:18px}
+</style>
+</head>
+<body>
+
+<h1>🔁 X 博主内容抓取 → 翻译 → 配图 全流程</h1>
+<p class="sub">今天与 Hermes Agent 协作完成的完整工作链路</p>
+
+<div class="diagram">
+<svg width="1300" height="700" viewBox="0 0 1300 700">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185"/>
+    </marker>
+  </def>
+
+  <rect width="1300" height="700" fill="url(#grid)"/>
+
+  <!-- Phase 1: 获取访问权限 -->
+  <rect x="30" y="40" width="280" height="620" rx="8" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="50" y="65" fill="#fbbf24" font-size="14" font-weight="bold">阶段一：获取权限</text>
+
+  <!-- Step 1.1 -->
+  <rect x="60" y="85" width="220" height="56" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="60" y="85" width="220" height="56" rx="6" fill="rgba(8,51,68,0.4)"/>
+  <text x="170" y="110" fill="#22d3ee" font-size="12" text-anchor="middle">🔗 用户提供博主链接</text>
+  <text x="170" y="128" fill="#64748b" font-size="10" text-anchor="middle">x.com/m4ilboq</text>
+
+  <line x1="280" y1="113" x2="310" y2="113" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Step 1.2 -->
+  <rect x="320" y="85" width="220" height="56" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+  <rect x="320" y="85" width="220" height="56" rx="6" fill="rgba(120,53,15,0.3)"/>
+  <text x="430" y="108" fill="#fbbf24" font-size="12" text-anchor="middle">⚠️ 未登录限制</text>
+  <text x="430" y="126" fill="#64748b" font-size="10" text-anchor="middle">只能看16条 Highlights</text>
+
+  <!-- Step 1.3 -->
+  <line x1="430" y1="141" x2="430" y2="175" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrowRed)"/>
+  <rect x="320" y="175" width="220" height="56" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="320" y="175" width="220" height="56" rx="6" fill="rgba(6,78,59,0.4)"/>
+  <text x="430" y="198" fill="#34d399" font-size="12" text-anchor="middle">🔑 Cookie登录</text>
+  <text x="430" y="216" fill="#64748b" font-size="10" text-anchor="middle">auth_token 注入浏览器</text>
+
+  <!-- Step 1.4 -->
+  <line x1="430" y1="231" x2="430" y2="265" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="320" y="265" width="220" height="56" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="320" y="265" width="220" height="56" rx="6" fill="rgba(8,51,68,0.4)"/>
+  <text x="430" y="288" fill="#22d3ee" font-size="12" text-anchor="middle">✅ 登录成功</text>
+  <text x="430" y="306" fill="#64748b" font-size="10" text-anchor="middle">可访问 Highlights + Posts</text>
+
+  <!-- Phase 2: 数据抓取 -->
+  <rect x="570" y="40" width="320" height="620" rx="8" fill="none" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="590" y="65" fill="#34d399" font-size="14" font-weight="bold">阶段二：数据抓取</text>
+
+  <line x1="540" y1="293" x2="600" y2="293" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="600" y="260" width="260" height="48" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+  <rect x="600" y="260" width="260" height="48" rx="6" fill="rgba(76,29,149,0.4)"/>
+  <text x="730" y="280" fill="#a78bfa" font-size="12" text-anchor="middle">📜 自动滚动页面</text>
+  <text x="730" y="296" fill="#64748b" font-size="10" text-anchor="middle">browser_scroll × N次</text>
+
+  <line x1="730" y1="308" x2="730" y2="340" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="600" y="340" width="260" height="48" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="600" y="340" width="260" height="48" rx="6" fill="rgba(8,51,68,0.4)"/>
+  <text x="730" y="360" fill="#22d3ee" font-size="12" text-anchor="middle">🔍 JS提取帖子数据</text>
+  <text x="730" y="376" fill="#64748b" font-size="10" text-anchor="middle">meta itemprop + aria-label</text>
+
+  <line x1="730" y1="388" x2="730" y2="420" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="600" y="420" width="260" height="48" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+  <rect x="600" y="420" width="260" height="48" rx="6" fill="rgba(120,53,15,0.3)"/>
+  <text x="730" y="440" fill="#fbbf24" font-size="12" text-anchor="middle">🎯 过滤提问帖</text>
+  <text x="730" y="456" fill="#64748b" font-size="10" text-anchor="middle">关键词: มั้ย/ไหม/อะไร/ใคร</text>
+
+  <line x1="730" y1="468" x2="730" y2="500" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="600" y="500" width="260" height="48" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="600" y="500" width="260" height="48" rx="6" fill="rgba(6,78,59,0.4)"/>
+  <text x="730" y="520" fill="#34d399" font-size="12" text-anchor="middle">✅ 106条提问帖到手</text>
+  <text x="730" y="536" fill="#64748b" font-size="10" text-anchor="middle">带互动数据(赞/转/浏览)</text>
+
+  <!-- Phase 3: 内容加工 -->
+  <rect x="920" y="40" width="350" height="620" rx="8" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="940" y="65" fill="#a78bfa" font-size="14" font-weight="bold">阶段三：内容加工</text>
+
+  <line x1="890" y1="520" x2="950" y2="330" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="950" y="300" width="290" height="48" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
+  <rect x="950" y="300" width="290" height="48" rx="6" fill="rgba(136,19,55,0.4)"/>
+  <text x="1095" y="320" fill="#fb7185" font-size="12" text-anchor="middle">🌐 中泰双语翻译</text>
+  <text x="1095" y="336" fill="#64748b" font-size="10" text-anchor="middle">泰语→中文 逐条翻译</text>
+
+  <line x1="1095" y1="348" x2="1095" y2="380" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="950" y="380" width="290" height="48" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+  <rect x="950" y="380" width="290" height="48" rx="6" fill="rgba(120,53,15,0.3)"/>
+  <text x="1095" y="400" fill="#fbbf24" font-size="12" text-anchor="middle">🏷️ 双语标签生成</text>
+  <text x="1095" y="416" fill="#64748b" font-size="10" text-anchor="middle">#情感 #ความรัก</text>
+
+  <line x1="1095" y1="428" x2="1095" y2="460" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="950" y="460" width="290" height="48" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="950" y="460" width="290" height="48" rx="6" fill="rgba(8,51,68,0.4)"/>
+  <text x="1095" y="480" fill="#22d3ee" font-size="12" text-anchor="middle">🎨 HTML卡片生成</text>
+  <text x="1095" y="496" fill="#64748b" font-size="10" text-anchor="middle">7种渐变色 轮换</text>
+
+  <line x1="1095" y1="508" x2="1095" y2="540" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="950" y="540" width="290" height="48" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="950" y="540" width="290" height="48" rx="6" fill="rgba(6,78,59,0.4)"/>
+  <text x="1095" y="558" fill="#34d399" font-size="12" text-anchor="middle">🖼️ Puppeteer截图→PNG</text>
+  <text x="1095" y="574" fill="#64748b" font-size="10" text-anchor="middle">60张 900×1200 3:4</text>
+
+  <!-- Output -->
+  <text x="1095" y="630" fill="#e2e8f0" font-size="13" text-anchor="middle" font-weight="bold">📦 输出: Markdown/HTML + PNG图片包</text>
+</svg>
+</div>
+
+<!-- Summary Section -->
+<div class="section">
+  <h2>📋 完整步骤拆解</h2>
+  <div class="grid">
+    <div class="card">
+      <h3 class="amber">① 浏览器登录</h3>
+      <ul>
+        <li>用户从 Chrome DevTools <code>Application → Cookies</code> 复制 <code>auth_token</code></li>
+        <li>Hermes 通过 <code>document.cookie</code> 注入浏览器</li>
+        <li>绕过 OAuth/密码，直接用已有登录态</li>
+        <li><b>坑</b>：<code>document.cookie</code> 拿不到 httpOnly 的 token</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="green">② 页面滚动 + 数据提取</h3>
+      <ul>
+        <li><code>browser_scroll</code> 重复滚动加载帖子</li>
+        <li><code>browser_console</code> 执行 JS 提取 meta 标签数据</li>
+        <li>从 <code>itemprop="articleBody"</code> 拿正文</li>
+        <li>从 <code>aria-label</code> 拿互动数据</li>
+        <li><b>坑</b>：Highlights 页只有30条，需切到 Posts 页</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="violet">③ 过滤 + 翻译 + 标签</h3>
+      <ul>
+        <li>Python 脚本筛选含泰语疑问词的帖子</li>
+        <li>LLM 逐条翻译泰语→中文</li>
+        <li>按主题打双语标签（#情感 #ความรัก）</li>
+        <li>去重、按日期排序</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="cyan">④ 配图生成</h3>
+      <ul>
+        <li>HTML + CSS 设计 7 种风格卡片</li>
+        <li><code>puppeteer</code> 逐个截图 → PNG</li>
+        <li>900×1200（3:4 社媒最佳尺寸）</li>
+        <li>纯泰语，无标签，无中文</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Automation Section -->
+<div class="section">
+  <h2>🤖 自动化方案</h2>
+  <div class="grid">
+    <div class="card">
+      <h3 class="green">方案A：Hermes Cron 定时任务</h3>
+      <p>最快上线，零开发。创建一个定时任务，每天自动检查博主新帖。</p>
+      <p style="margin-top:10px"><code>cronjob create "每天检查 @m4ilboq 新帖，如有新提问帖则翻译+打标签" --schedule "0 9 * * *"</code></p>
+      <p style="margin-top:8px;color:#64748b">优点：直接用现有工具 | 缺点：每次都需登录态刷新</p>
+    </div>
+    <div class="card">
+      <h3 class="cyan">方案B：Feishu 机器人 + 飞书表格</h3>
+      <p>通过飞书开放平台 + Webhook 实现：</p>
+      <ul>
+        <li>用户在飞书群发送博主链接</li>
+        <li>机器人调用 Hermes API 抓取</li>
+        <li>结果写入飞书多维表格</li>
+        <li>群内推送新帖通知</li>
+      </ul>
+      <p style="margin-top:8px;color:#64748b">优点：团队协作 | 缺点：需开发飞书应用</p>
+    </div>
+    <div class="card">
+      <h3 class="amber">方案C：网页工具（Web App）</h3>
+      <p>部署一个简单的页面：</p>
+      <ul>
+        <li>输入 X 博主链接 → 选择过滤条件</li>
+        <li>后端调用 Hermes / Puppeteer</li>
+        <li>输出 HTML 预览 + 一键下载 ZIP</li>
+      </ul>
+      <p style="margin-top:8px;color:#64748b">优点：最灵活 | 缺点：需服务器</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>🔧 关键技术栈</h2>
+  <div class="grid">
+    <div class="card"><h3 class="cyan">抓取</h3><p>Hermes Browser 工具<br>auth_token Cookie 注入<br>JS meta/aria 提取</p></div>
+    <div class="card"><h3 class="green">处理</h3><p>Python 过滤/去重<br>LLM 翻译+标签<br>JSON 结构化存储</p></div>
+    <div class="card"><h3 class="violet">渲染</h3><p>HTML/CSS 卡片模板<br>Puppeteer 截图<br>7种风格轮换</p></div>
+    <div class="card"><h3 class="amber">自动化</h3><p>Hermes Cron 定时<br>飞书 Webhook 推送<br>REST API 对外暴露</p></div>
+  </div>
+</div>
+
+<div class="footer">Built with Hermes Agent · 2026.07.21</div>
+</body>
+</html>
