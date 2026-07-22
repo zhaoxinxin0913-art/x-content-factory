@@ -209,7 +209,8 @@ async function run(){
   B.disabled=true;B.textContent='⏳ 抓取中...';R.classList.remove('show');L.innerHTML='';A('开始...','info');
   try{
     const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,token:t,count:parseInt(n)})});
-    const d=await r.json();
+    let d;
+    try{d=await r.json()}catch(e){A('服务器返回异常，请稍后重试','err');B.disabled=false;B.textContent='🚀 开始抓取';return}
     if(d.error){A(d.error,'err');B.disabled=false;B.textContent='🚀 开始抓取';return}
     A('完成: '+d.questions+' 条帖, '+d.images+' 张图','ok');
     R.innerHTML='<h3>✅ 完成</h3><div class="stats"><div class="st"><div class="n">@'+d.handle+'</div><div class="l">博主</div></div><div class="st"><div class="n">'+d.questions+'</div><div class="l">提问帖</div></div><div class="st"><div class="n">'+d.images+'</div><div class="l">配图PNG</div></div></div><div class="btns"><a href="/output/'+d.handle+'/preview.html" target="_blank">🔗 查看素材</a><a class="png" href="/output/'+d.handle+'/cards.html" target="_blank">🎨 纯卡片</a></div>';
@@ -246,9 +247,10 @@ const server=http.createServer(async(req,res)=>{
     });return;
   }
   if(u.pathname.startsWith('/output/')){const f=path.join(OUTPUT,u.pathname.replace('/output/',''));if(fs.existsSync(f)){const m={'html':'text/html','png':'image/png','json':'application/json'};res.writeHead(200,{'Content-Type':m[path.extname(f).slice(1)]||'text/plain'});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
+  if(u.pathname==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({status:'ok',time:new Date().toISOString()}));return}
   if(u.pathname.startsWith('/api/zip/')){const h=u.pathname.split('/')[3],jd=path.join(OUTPUT,h);if(!fs.existsSync(jd)){res.writeHead(404);res.end();return}const{execSync}=require('child_process'),zp=path.join(OUTPUT,h+'.zip');try{try{fs.unlinkSync(zp)}catch(e){}execSync(`cd "${OUTPUT}" && zip -rq "${h}.zip" "${h}" -x "*.js"`,{stdio:'ignore',timeout:30000});const stat=fs.statSync(zp);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':stat.size,'Content-Disposition':`attachment; filename="${h}.zip"`});const stream=fs.createReadStream(zp);stream.pipe(res);stream.on('end',()=>{try{fs.unlinkSync(zp)}catch(e){}})}catch(e){res.writeHead(500);res.end('ZIP failed: '+e.message)}return}
   if(u.pathname.startsWith('/api/download/')){const f=path.join(OUTPUT,u.pathname.replace('/api/download/',''));if(fs.existsSync(f)){res.writeHead(200,{'Content-Type':'image/png','Content-Disposition':`attachment; filename="${path.basename(f)}"`});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
   res.writeHead(404);res.end();
 });
 
-server.listen(PORT,async()=>{console.log(`\n🏭 X内容工厂 → http://localhost:${PORT}\n`);try{const b=await puppeteer.launch({headless:'new',args:['--no-sandbox']});await b.close();console.log('✅ Puppeteer 就绪\n')}catch(e){console.log('⚠️ Puppeteer 未就绪:',e.message,'\n')}});
+server.listen(PORT,async()=>{console.log(`\n🏭 X内容工厂 → http://localhost:${PORT}\n`);try{const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']});await b.close();console.log('✅ Puppeteer 就绪\n')}catch(e){console.log('⚠️ Puppeteer 预热失败(将在请求时重试):',e.message,'\n')}});
