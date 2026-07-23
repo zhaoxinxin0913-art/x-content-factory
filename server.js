@@ -10,6 +10,19 @@ const STYLES=[{cls:'s1',css:'background:#fafafa',txt:'color:#333'},
 {cls:'s5',css:'background:linear-gradient(135deg,#ff9a9e,#fecfef 50%,#a1c4fd)',txt:'color:#fff;text-shadow:0 2px 20px rgba(0,0,0,.3)'},
 {cls:'s6',css:'background:#f4e4c1',txt:'color:#5d4037;font-style:italic'},
 {cls:'s7',css:'background:#0f0f23',txt:'color:#00f2fe;text-shadow:0 0 40px rgba(0,242,254,.5)'}];
+// 排除：纯个人状态 + 引流其他平台
+const EXCLUDE_PERSONAL=/^(สวัสดี|good morning|good night|กู?ด(มอร์นิ่ง|ไนท์)|อรุณสวัสดิ์|ราตรีสวัสดิ์|นอนดึก|ง่วง|เหนื่อย|ตื่นสาย|วันนี้เหนื่อย|ปวดหัว|ไม่สบาย).{0,80}$/i;
+const EXCLUDE_PLATFORM=/(?:ig|instagram|tiktok|ติ๊กต๊อก|line ?@|ไลน์|youtube|yt|subscribe|ซับ|ช่อง|คลิป(?:ลิ้งค์|ลิงก์)|bio|link in|linktree)/i;
+const INTERACT_SIGNALS=/มั้ย|ไหม|อะไร|ไหน|ยังไง|ใคร|ทำไม|คิดว่า|ชอบ|แนะนำ|เคย|หรือ|บ้าง|\?/;
+const EXCLUDE_STATUS=/^.{0,50}$/.source; // very short = likely personal update
+function isGoodPost(t){
+  if(t.length<30)return false;
+  if(EXCLUDE_PLATFORM.test(t))return false;
+  // 个人状态：仅排除没有互动信号的短碎碎念
+  if(EXCLUDE_PERSONAL.test(t)&&!INTERACT_SIGNALS.test(t))return false;
+  return true;
+}
+// (legacy) question keywords for backward compat
 const Q=['มั้ย','ไหม','อะไร','ไหน','ยังไง','ใคร','เมื่อไหร่','ทำไม','กี่','?','ม้าย','ป้ะ','คะ','หรือ'];
 
 function tagText(t){
@@ -36,6 +49,30 @@ function basicCN(t){
   return cn.trim()||'';
 }
 
+function analyzeStyle(posts){
+  // 话题分布（中文标签）
+  const tc={};posts.forEach(p=>p.tags.split(' ').filter(t=>/[\u4e00-\u9fa5]/.test(t)).forEach(t=>{tc[t]=(tc[t]||0)+1}));
+  const topTags=Object.entries(tc).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([t,n])=>({t,n}));
+  // 互动均值
+  let tl=0,tr=0,tv=0,ve=0;
+  posts.forEach(p=>{const a=p.aria||'',l=parseInt(((a.match(/(\d[\d,]*)\s*like/)||['','0'])[1]).replace(/,/g,'')),r=parseInt(((a.match(/(\d[\d,]*)\s*repost/)||['','0'])[1]).replace(/,/g,'')),v=parseInt(((a.match(/(\d[\d,]*)\s*view/)||['','0'])[1]).replace(/,/g,''));if(l||r||v){tl+=l;tr+=r;tv+=v;ve++}});
+  const n=ve||1;
+  // 提问词频
+  const qw={'มั้ย/ไหม':['มั้ย','ไหม'],'อะไร':['อะไร'],'ทำไม':['ทำไม'],'ใคร':['ใคร'],'ยังไง':['ยังไง']};
+  const qs={};posts.forEach(p=>Object.entries(qw).forEach(([l,ws])=>{if(ws.some(w=>p.q.includes(w)))qs[l]=(qs[l]||0)+1}));
+  const topQ=Object.entries(qs).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([w,c])=>({w,c}));
+  // 内容调性
+  const all=posts.map(p=>p.q).join(' ');const tones=[];
+  if(/ขอบคุณ|รัก|น่ารัก|ซึ้ง|อบอุ่น/.test(all))tones.push('温暖亲和');
+  if(/555|ฮา|ตลก|ขำ|เฮฮา/.test(all))tones.push('幽默风趣');
+  if(/ชีวิต|ความรู้สึก|ความหมาย|จริงๆ|ลึกๆ/.test(all))tones.push('深度思考');
+  if(/กิน|อาหาร|คาเฟ่|ร้าน|ขนม/.test(all))tones.push('生活分享');
+  if(!tones.length)tones.push('轻松互动');
+  // 最热帖
+  let bp=null,bs=0;posts.forEach(p=>{const v=parseInt(((p.aria||'').match(/(\d[\d,]*)\s*view/)||['','0'])[1].replace(/,/g,''));if(v>bs){bs=v;bp=p}});
+  return{topTags,avgLikes:Math.round(tl/n),avgReposts:Math.round(tr/n),avgViews:Math.round(tv/n),topQ,tone:tones.slice(0,3).join(' · '),bestPost:bp?{q:bp.q.substring(0,60)+(bp.q.length>60?'…':''),views:bs}:null};
+}
+
 // ============================================================
 async function scrapeX(url,token,maxCount){
   const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
@@ -50,14 +87,14 @@ async function scrapeX(url,token,maxCount){
   await new Promise(r=>setTimeout(r,1500));
   const posts=new Map();
   for(let s=0;s<15&&posts.size<maxCount;s++){
-    const np=await p.evaluate((mk)=>{
+    const np=await p.evaluate(()=>{
       const f=[];document.querySelectorAll('[data-testid="tweet"]').forEach(a=>{
         const t=a.querySelector('[data-testid="tweetText"]')?.innerText||'';
-        if(!t||f.some(x=>x.text===t)||!mk.some(m=>t.includes(m)))return;
+        if(!t||f.some(x=>x.text===t))return;
         f.push({text:t,date:(a.querySelector('time')?.getAttribute('datetime')||'').split('T')[0],aria:a.querySelector('[role="group"]')?.getAttribute('aria-label')||''});
       });return f;
-    },Q);
-    np.forEach(x=>{const k=x.text.substring(0,50);if(!posts.has(k))posts.set(k,x)});
+    });
+    np.filter(x=>isGoodPost(x.text)).forEach(x=>{const k=x.text.substring(0,50);if(!posts.has(k))posts.set(k,x)});
     if(posts.size>=maxCount)break;
     await p.evaluate(()=>window.scrollBy(0,3000));await new Promise(r=>setTimeout(r,1200));
   }
@@ -185,6 +222,20 @@ body{background:#fff;color:#1a1a1a;font-family:-apple-system,BlinkMacSystemFont,
 .note{background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:10px 14px;font-size:11px;color:#999;margin-top:10px}
 details summary{color:#999;font-size:12px;cursor:pointer}
 details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;font-size:11px;color:#666;line-height:1.7}
+.analysis{border:1.5px solid #e5e5e5;border-radius:14px;padding:24px;margin-top:14px}
+.analysis h4{font-size:14px;font-weight:700;color:#000;margin-bottom:14px}
+.an-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.an-stat{background:#f7f7f7;border-radius:8px;padding:10px 16px;text-align:center;min-width:70px}
+.an-stat .v{font-size:20px;font-weight:800;color:#000}
+.an-stat .k{font-size:10px;color:#999;margin-top:2px}
+.an-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.an-tag{background:#f0f0f0;border-radius:20px;padding:3px 10px;font-size:12px;color:#555}
+.an-tag span{color:#000;font-weight:700;margin-left:4px}
+.an-tone{font-size:13px;color:#555;margin-bottom:12px}
+.an-qrow{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.an-qw{background:#000;color:#fff;border-radius:20px;padding:3px 10px;font-size:12px}
+.an-best{background:#f9f9f9;border-radius:8px;padding:10px 14px;font-size:12px;color:#333;line-height:1.5}
+.an-best .bv{color:#999;font-size:11px;margin-top:3px}
 </style></head><body><div class="c">
 <div class="hero"><h1>X 内容工厂</h1><p>输入链接 → 自动抓取 → 配图下载</p></div>
 <div class="box">
@@ -203,6 +254,23 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 <script>
 const L=document.getElementById('log'),R=document.getElementById('result'),B=document.getElementById('goBtn');
 function A(m,c=''){L.classList.add('show');const d=document.createElement('div');d.className='ln'+(c?' '+c:'');d.textContent='['+new Date().toLocaleTimeString()+'] '+m;L.appendChild(d);L.scrollTop=L.scrollHeight}
+function fmt(n){return n>=10000?Math.round(n/10000)+'万':n>=1000?Math.round(n/1000)+'k':n}
+function renderAnalysis(a){
+  if(!a)return '';
+  const tags=a.topTags.map(x=>'<span class="an-tag">'+x.t+'<span>'+x.n+'</span></span>').join('');
+  const qs=a.topQ.map(x=>'<span class="an-qw">'+x.w+' ×'+x.c+'</span>').join('');
+  const best=a.bestPost?'<div class="an-best">🏆 最热帖子：'+a.bestPost.q+'<div class="bv">👁 '+fmt(a.bestPost.views)+' 次浏览</div></div>':'';
+  return '<div class="analysis"><h4>📊 博主内容风格分析</h4>'+
+    '<div class="an-row">'+
+    '<div class="an-stat"><div class="v">'+fmt(a.avgViews)+'</div><div class="k">均次浏览</div></div>'+
+    '<div class="an-stat"><div class="v">'+a.avgReposts+'</div><div class="k">均次转发</div></div>'+
+    '<div class="an-stat"><div class="v">'+a.avgLikes+'</div><div class="k">均次点赞</div></div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:#999;margin-bottom:6px">话题分布</div><div class="an-tags">'+tags+'</div>'+
+    '<div style="font-size:11px;color:#999;margin-bottom:6px">高频提问词</div><div class="an-qrow">'+qs+'</div>'+
+    '<div class="an-tone">🎨 内容调性：<strong>'+a.tone+'</strong></div>'+
+    best+'</div>';
+}
 async function run(){
   const u=document.getElementById('url').value.trim(),t=document.getElementById('token').value.trim(),n=document.getElementById('count').value;
   if(!u||!t)return alert('请填写链接和 auth_token');
@@ -213,7 +281,7 @@ async function run(){
     try{d=await r.json()}catch(e){A('服务器返回异常，请稍后重试','err');B.disabled=false;B.textContent='🚀 开始抓取';return}
     if(d.error){A(d.error,'err');B.disabled=false;B.textContent='🚀 开始抓取';return}
     A('完成: '+d.questions+' 条帖, '+d.images+' 张图','ok');
-    R.innerHTML='<h3>✅ 完成</h3><div class="stats"><div class="st"><div class="n">@'+d.handle+'</div><div class="l">博主</div></div><div class="st"><div class="n">'+d.questions+'</div><div class="l">提问帖</div></div><div class="st"><div class="n">'+d.images+'</div><div class="l">配图PNG</div></div></div><div class="btns"><a href="/output/'+d.handle+'/preview.html" target="_blank">🔗 查看素材</a><a class="png" href="/output/'+d.handle+'/cards.html" target="_blank">🎨 纯卡片</a></div>';
+    R.innerHTML='<h3>✅ 完成</h3><div class="stats"><div class="st"><div class="n">@'+d.handle+'</div><div class="l">博主</div></div><div class="st"><div class="n">'+d.questions+'</div><div class="l">提问帖</div></div><div class="st"><div class="n">'+d.images+'</div><div class="l">配图PNG</div></div></div><div class="btns"><a href="/output/'+d.handle+'/preview.html" target="_blank">🔗 查看素材</a><a class="png" href="/output/'+d.handle+'/cards.html" target="_blank">🎨 纯卡片</a></div>'+renderAnalysis(d.analysis);
     R.classList.add('show');
   }catch(e){A(e.message,'err')}
   B.disabled=false;B.textContent='🚀 开始抓取';
@@ -242,7 +310,8 @@ const server=http.createServer(async(req,res)=>{
         if(fs.existsSync(tf)){const tmap=JSON.parse(fs.readFileSync(tf,'utf8'));data.posts.forEach(p=>{const q=p.q;let best='',bk='';for(const[k,v]of Object.entries(tmap)){if(q.startsWith(k.substring(0,Math.min(40,k.length)))&&k.length>bk.length){bk=k;best=v}}if(best)p.cn=best})}
         genCards(jobDir,data.posts);const imgCount=await screenshotCards(jobDir);
         genPreview(jobDir,handle,data.posts);
-        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({handle,questions:data.posts.length,images:imgCount}));
+        const analysis=analyzeStyle(data.posts);
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({handle,questions:data.posts.length,images:imgCount,analysis}));
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
     });return;
   }
