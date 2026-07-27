@@ -240,36 +240,49 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 .an-best{background:#f9f9f9;border-radius:8px;padding:10px 14px;font-size:12px;color:#333;line-height:1.5}
 .an-best .bv{color:#999;font-size:11px;margin-top:3px}
 </style></head><body><div class="c">
-<div class="hero"><h1>X 内容工厂</h1><p>输入链接 → 自动抓取 → 配图下载</p></div>
+<div style="text-align:right;margin-bottom:-30px"><button class="btn" style="width:auto;padding:6px 14px;background:#f0f0f0;color:#333;font-size:11px;border:1px solid #ddd" onclick="toggleLang()" id="langBtn">EN</button></div>
+<div class="hero"><h1 data-i18n="title">X 内容工厂</h1><p data-i18n="subtitle">输入链接 → 自动抓取 → 配图下载</p></div>
 <div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px">
-  <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')">📋 批量抓取</button>
-  <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')">🎬 媒体搬运</button>
+  <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
+  <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
 </div>
 <div id="tab-batch">
 <div class="box">
-  <h2>🔗 X 博主链接</h2>
-  <input class="inp" id="url" placeholder="https://x.com/博主用户名">
-  <h2 style="margin-top:14px">🔐 Auth Token</h2>
-  <p class="dsc">从 Chrome DevTools 复制</p>
-  <input class="inp" id="token" placeholder="粘贴 auth_token">
-  <details><summary>📖 怎么获取？</summary>
-  <div>1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制</div></details>
-  <div class="range-wrap"><label><span>数量</span><span id="cnt">30</span></label><input type="range" id="count" min="10" max="100" value="30" oninput="document.getElementById('cnt').textContent=this.value"></div>
-  <button class="btn btn-go" id="goBtn" onclick="run()">🚀 开始抓取</button>
-  <div class="note">仅用于访问公开帖子，不会存储</div>
+  <h2 data-i18n="lblUrl">🔗 X 博主链接</h2>
+  <input class="inp" id="url" data-ph="phUrl" placeholder="https://x.com/博主用户名">
+  <h2 style="margin-top:14px" data-i18n="lblToken">🔐 Auth Token</h2>
+  <p class="dsc" data-i18n="lblTokenDesc">从 Chrome DevTools 复制</p>
+  <input class="inp" id="token" data-ph="phToken" placeholder="粘贴 auth_token">
+  <details><summary data-i18n="howTo">📖 怎么获取？</summary>
+  <div data-i18n="howToDetail">1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制</div></details>
+  <div class="range-wrap"><label><span data-i18n="lblCount">数量</span><span id="cnt">30</span></label><input type="range" id="count" min="10" max="100" value="30" oninput="document.getElementById('cnt').textContent=this.value"></div>
+  <button class="btn btn-go" id="goBtn" onclick="run()" data-i18n="btnRun">🚀 开始抓取</button>
+  <div class="note" data-i18n="note">仅用于访问公开帖子，不会存储</div>
 </div>
 <div class="result" id="result"></div><div class="log" id="log"></div></div>
 <div id="tab-media" style="display:none">
 <div class="box">
-  <h2>🎬 媒体搬运</h2>
-  <p class="dsc">输入单条帖子链接，提取文案、图片/视频、优质评论</p>
-  <input class="inp" id="murl" placeholder="https://x.com/用户名/status/帖子ID">
-  <h2 style="margin-top:14px">🔐 Auth Token</h2>
-  <input class="inp" id="mtoken" placeholder="粘贴 auth_token">
-  <button class="btn btn-go" id="mBtn" onclick="runMedia()">🎬 开始搬运</button>
+  <h2 data-i18n="mediaTitle">🎬 媒体搬运</h2>
+  <p class="dsc" data-i18n="mediaDesc">输入单条帖子链接，提取文案、图片/视频、优质评论</p>
+  <input class="inp" id="murl" data-ph="phMediaUrl" placeholder="https://x.com/用户名/status/帖子ID">
+  <h2 style="margin-top:14px" data-i18n="lblToken2">🔐 Auth Token</h2>
+  <input class="inp" id="mtoken" data-ph="phToken" placeholder="粘贴 auth_token">
+  <button class="btn btn-go" id="mBtn" onclick="runMedia()" data-i18n="btnMedia">🎬 开始搬运</button>
 </div>
 <div class="result" id="mresult"></div><div class="log" id="mlog"></div></div></div>
 <script>
+const i18n={
+  zh:{title:'X 内容工厂',subtitle:'输入链接 → 自动抓取 → 配图下载',tabBatch:'📋 批量抓取',tabMedia:'🎬 媒体搬运',lblUrl:'🔗 X 博主链接',phUrl:'https://x.com/博主用户名',lblToken:'🔐 Auth Token',lblToken2:'🔐 Auth Token',lblTokenDesc:'从 Chrome DevTools 复制',phToken:'粘贴 auth_token',howTo:'📖 怎么获取？',howToDetail:'1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制',lblCount:'数量',btnRun:'🚀 开始抓取',note:'仅用于访问公开帖子，不会存储',mediaTitle:'🎬 媒体搬运',mediaDesc:'输入单条帖子链接，提取文案、图片/视频、优质评论',phMediaUrl:'https://x.com/用户名/status/帖子ID',btnMedia:'🎬 开始搬运'},
+  en:{title:'X Content Factory',subtitle:'Paste link → Auto scrape → Download cards',tabBatch:'📋 Batch Scrape',tabMedia:'🎬 Media Extract',lblUrl:'🔗 X Profile URL',phUrl:'https://x.com/username',lblToken:'🔐 Auth Token',lblToken2:'🔐 Auth Token',lblTokenDesc:'Copy from Chrome DevTools',phToken:'Paste auth_token',howTo:'📖 How to get it?',howToDetail:'1. Open x.com and log in<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. Find auth_token → double-click Value to copy',lblCount:'Count',btnRun:'🚀 Start Scraping',note:'Only accesses public posts. Nothing is stored.',mediaTitle:'🎬 Media Extract',mediaDesc:'Paste a single post URL to extract text, images/video, and top comments',phMediaUrl:'https://x.com/username/status/postID',btnMedia:'🎬 Start Extracting'}
+};
+let curLang='zh';
+function toggleLang(){
+  curLang=curLang==='zh'?'en':'zh';
+  document.getElementById('langBtn').textContent=curLang==='zh'?'EN':'中文';
+  const t=i18n[curLang];
+  document.querySelectorAll('[data-i18n]').forEach(el=>{const k=el.getAttribute('data-i18n');if(t[k])el.innerHTML=t[k];});
+  document.querySelectorAll('[data-ph]').forEach(el=>{const k=el.getAttribute('data-ph');if(t[k])el.placeholder=t[k];});
+}
 const L=document.getElementById('log'),R=document.getElementById('result'),B=document.getElementById('goBtn');
 function A(m,c=''){L.classList.add('show');const d=document.createElement('div');d.className='ln'+(c?' '+c:'');d.textContent='['+new Date().toLocaleTimeString()+'] '+m;L.appendChild(d);L.scrollTop=L.scrollHeight}
 function fmt(n){return n>=10000?Math.round(n/10000)+'万':n>=1000?Math.round(n/1000)+'k':n}
