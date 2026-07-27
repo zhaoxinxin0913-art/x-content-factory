@@ -105,11 +105,13 @@ async function scrapeX(url,token,maxCount){
 // ============================================================
 function genCards(jobDir,posts){
   let css='',cards='';
+  const fontCSS=fs.readFileSync(path.join(__dirname,'fonts','font-face.css'),'utf8');
   STYLES.forEach(s=>css+=`.${s.cls}{${s.css}}.${s.cls} .q{${s.txt}}\n`);
   posts.forEach((p,i)=>{const s=STYLES[i%STYLES.length];cards+=`<div class="card ${s.cls}"><div class="q">${p.q}</div></div>\n`});
-  fs.writeFileSync(path.join(jobDir,'cards.html'),`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;700;800&family=Noto+Sans:wght@400;700;800&display=swap" rel="stylesheet"><style>
+  fs.writeFileSync(path.join(jobDir,'cards.html'),`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><style>
+${fontCSS}
 *{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-wrap:wrap;gap:20px;padding:20px;justify-content:center}
-.card{width:900px;height:1200px;border-radius:36px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai','Noto Sans',-apple-system,sans-serif;padding:80px 70px}
+.card{width:900px;height:1200px;border-radius:36px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:80px 70px}
 .q{font-size:60px;font-weight:800;line-height:1.4;text-align:center}${css}</style></head><body>${cards}</body></html>`,'utf8');
 }
 
