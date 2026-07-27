@@ -241,6 +241,11 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 .an-best .bv{color:#999;font-size:11px;margin-top:3px}
 </style></head><body><div class="c">
 <div class="hero"><h1>X 内容工厂</h1><p>输入链接 → 自动抓取 → 配图下载</p></div>
+<div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px">
+  <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')">📋 批量抓取</button>
+  <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')">🎬 媒体搬运</button>
+</div>
+<div id="tab-batch">
 <div class="box">
   <h2>🔗 X 博主链接</h2>
   <input class="inp" id="url" placeholder="https://x.com/博主用户名">
@@ -254,6 +259,16 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <div class="note">仅用于访问公开帖子，不会存储</div>
 </div>
 <div class="result" id="result"></div><div class="log" id="log"></div></div>
+<div id="tab-media" style="display:none">
+<div class="box">
+  <h2>🎬 媒体搬运</h2>
+  <p class="dsc">输入单条帖子链接，提取文案、图片/视频、优质评论</p>
+  <input class="inp" id="murl" placeholder="https://x.com/用户名/status/帖子ID">
+  <h2 style="margin-top:14px">🔐 Auth Token</h2>
+  <input class="inp" id="mtoken" placeholder="粘贴 auth_token">
+  <button class="btn btn-go" id="mBtn" onclick="runMedia()">🎬 开始搬运</button>
+</div>
+<div class="result" id="mresult"></div><div class="log" id="mlog"></div></div></div>
 <script>
 const L=document.getElementById('log'),R=document.getElementById('result'),B=document.getElementById('goBtn');
 function A(m,c=''){L.classList.add('show');const d=document.createElement('div');d.className='ln'+(c?' '+c:'');d.textContent='['+new Date().toLocaleTimeString()+'] '+m;L.appendChild(d);L.scrollTop=L.scrollHeight}
@@ -289,7 +304,121 @@ async function run(){
   }catch(e){A(e.message,'err')}
   B.disabled=false;B.textContent='🚀 开始抓取';
 }
+function showTab(t){
+  document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
+  document.getElementById('tab-media').style.display=t==='media'?'':'none';
+}
+async function runMedia(){
+  const u=document.getElementById('murl').value.trim(),t=document.getElementById('mtoken').value.trim();
+  const MB=document.getElementById('mBtn'),ML=document.getElementById('mlog'),MR=document.getElementById('mresult');
+  if(!u||!t)return alert('请填写帖子链接和 auth_token');
+  MB.disabled=true;MB.textContent='⏳ 搬运中...';MR.classList.remove('show');ML.innerHTML='';
+  ML.classList.add('show');
+  function MA(m,c=''){const d=document.createElement('div');d.className='ln'+(c?' '+c:'');d.textContent='['+new Date().toLocaleTimeString()+'] '+m;ML.appendChild(d);ML.scrollTop=ML.scrollHeight}
+  MA('开始搬运...','info');
+  try{
+    const r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,token:t})});
+    let d;
+    try{d=await r.json()}catch(e){MA('服务器返回异常','err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
+    if(d.error){MA(d.error,'err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
+    MA('完成: '+d.images+' 张图'+(d.video?' + 视频':'')+' + '+d.comments+' 条优质评论','ok');
+    let html='<h3>✅ 搬运完成</h3>';
+    html+='<div class="stats"><div class="st"><div class="n">@'+d.handle+'</div><div class="l">博主</div></div><div class="st"><div class="n">'+d.images+'</div><div class="l">图片</div></div><div class="st"><div class="n">'+(d.video?'✅':'无')+'</div><div class="l">视频</div></div><div class="st"><div class="n">'+d.comments+'</div><div class="l">评论</div></div></div>';
+    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>原文：</strong><br>'+d.text.substring(0,200)+(d.text.length>200?'…':'')+'</div>';
+    html+='<div class="btns"><a href="'+d.outputDir+'data.json" target="_blank">📄 查看数据</a><a class="png" href="'+d.outputDir+'media/" target="_blank">📁 媒体文件</a></div>';
+    MR.innerHTML=html;MR.classList.add('show');
+  }catch(e){MA(e.message,'err')}
+  MB.disabled=false;MB.textContent='🎬 开始搬运';
+}
 </script></body></html>`;
+
+// ============================================================
+// 媒体搬运模块
+// ============================================================
+async function scrapePost(postUrl,token){
+  const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
+  const p=await b.newPage();await p.setViewport({width:1280,height:900});
+  await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
+  await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
+  await new Promise(r=>setTimeout(r,1000));
+  await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
+  await p.waitForSelector('[data-testid="tweet"]',{timeout:30000});
+  await new Promise(r=>setTimeout(r,2000));
+
+  // 提取主帖内容
+  const post=await p.evaluate(()=>{
+    const tweet=document.querySelector('article[data-testid="tweet"]');
+    if(!tweet)return null;
+    const text=tweet.querySelector('[data-testid="tweetText"]')?.innerText||'';
+    const time=tweet.querySelector('time')?.getAttribute('datetime')||'';
+    const aria=tweet.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
+    // 图片
+    const imgs=[...tweet.querySelectorAll('img[src*="pbs.twimg.com/media"]')].map(i=>{
+      let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
+      return src;
+    });
+    // 视频检测
+    const hasVideo=!!tweet.querySelector('video')||!!tweet.querySelector('[data-testid="videoPlayer"]');
+    // 用户信息
+    const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
+    return{text,time,aria,imgs,hasVideo,handle};
+  });
+
+  // 抓取评论（前20条热门）
+  await p.evaluate(()=>window.scrollBy(0,1500));
+  await new Promise(r=>setTimeout(r,2000));
+  const comments=await p.evaluate(()=>{
+    const tweets=[...document.querySelectorAll('article[data-testid="tweet"]')];
+    return tweets.slice(1,21).map(t=>{
+      const text=t.querySelector('[data-testid="tweetText"]')?.innerText||'';
+      const aria=t.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
+      const links=t.querySelectorAll('a[role="link"][href^="/"]');
+      let handle='';links.forEach(l=>{const h=l.getAttribute('href');if(h&&!h.includes('/status/')&&h.startsWith('/'))handle=h.replace('/','');});
+      const likes=parseInt(((aria.match(/(\d[\d,]*)\s*like/)||['','0'])[1]).replace(/,/g,''))||0;
+      return{handle,text:text.substring(0,300),likes};
+    }).filter(c=>c.text.length>5).sort((a,b)=>b.likes-a.likes);
+  });
+
+  await b.close();
+  return{post,comments};
+}
+
+async function downloadMedia(postUrl,token,jobDir){
+  const mediaDir=path.join(jobDir,'media');fs.existsSync(mediaDir)||fs.mkdirSync(mediaDir,{recursive:true});
+  const{post,comments}=await scrapePost(postUrl,token);
+  if(!post)throw new Error('无法读取帖子内容');
+
+  // 下载图片
+  const downloadedImgs=[];
+  for(let i=0;i<post.imgs.length;i++){
+    const imgUrl=post.imgs[i];
+    const ext=imgUrl.includes('format=png')?'png':'jpg';
+    const fname=`img_${String(i+1).padStart(2,'0')}.${ext}`;
+    try{
+      const{execSync}=require('child_process');
+      execSync(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000});
+      downloadedImgs.push(fname);
+    }catch(e){/* skip */}
+  }
+
+  // 下载视频（用 yt-dlp）
+  let videoFile=null;
+  if(post.hasVideo){
+    try{
+      const{execSync}=require('child_process');
+      const cookieFile=path.join(jobDir,'.cookies.txt');
+      fs.writeFileSync(cookieFile,`# Netscape HTTP Cookie File\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}\n`);
+      execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}" 2>/dev/null`,{timeout:120000});
+      if(fs.existsSync(path.join(mediaDir,'video.mp4')))videoFile='video.mp4';
+      try{fs.unlinkSync(cookieFile)}catch(e){}
+    }catch(e){/* video download failed, continue */}
+  }
+
+  // 筛选优质评论（top 10 by likes）
+  const topComments=comments.slice(0,10);
+
+  return{post,topComments,downloadedImgs,videoFile};
+}
 
 // ============================================================
 const server=http.createServer(async(req,res)=>{
@@ -318,7 +447,32 @@ const server=http.createServer(async(req,res)=>{
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
     });return;
   }
-  if(u.pathname.startsWith('/output/')){const f=path.join(OUTPUT,u.pathname.replace('/output/',''));if(fs.existsSync(f)){const m={'html':'text/html','png':'image/png','json':'application/json'};res.writeHead(200,{'Content-Type':m[path.extname(f).slice(1)]||'text/plain'});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
+  if(u.pathname==='/api/media'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
+      try{
+        const{url,token}=JSON.parse(body);
+        if(!url||!token)return res.end(JSON.stringify({error:'需要 url 和 token'}));
+        const sm=url.match(/x\.com\/(\w+)\/status\/(\d+)/);
+        if(!sm)return res.end(JSON.stringify({error:'请输入单条帖子链接 (含/status/)'}));
+        const handle=sm[1],tweetId=sm[2];
+        const jobDir=path.join(OUTPUT,'_media',`${handle}_${tweetId}`);
+        fs.existsSync(jobDir)||fs.mkdirSync(jobDir,{recursive:true});
+        const result=await Promise.race([downloadMedia(url,token,jobDir),new Promise((_,rj)=>setTimeout(()=>rj(new Error('超时120秒')),120000))]);
+        // 保存结果
+        fs.writeFileSync(path.join(jobDir,'data.json'),JSON.stringify(result,null,2));
+        res.writeHead(200,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({
+          handle,tweetId,
+          text:result.post.text,
+          images:result.downloadedImgs.length,
+          video:!!result.videoFile,
+          comments:result.topComments.length,
+          outputDir:`/output/_media/${handle}_${tweetId}/`
+        }));
+      }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
+    });return;
+  }
+  if(u.pathname.startsWith('/output/')){const f=path.join(OUTPUT,u.pathname.replace('/output/',''));if(fs.existsSync(f)){const m={'html':'text/html','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','json':'application/json','mp4':'video/mp4','webm':'video/webm'};res.writeHead(200,{'Content-Type':m[path.extname(f).slice(1)]||'application/octet-stream'});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
   if(u.pathname==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({status:'ok',time:new Date().toISOString()}));return}
   if(u.pathname.startsWith('/api/zip/')){const h=u.pathname.split('/')[3],jd=path.join(OUTPUT,h);if(!fs.existsSync(jd)){res.writeHead(404);res.end();return}const{execSync}=require('child_process'),zp=path.join(OUTPUT,h+'.zip');try{try{fs.unlinkSync(zp)}catch(e){}execSync(`cd "${OUTPUT}" && zip -rq "${h}.zip" "${h}" -x "*.js"`,{stdio:'ignore',timeout:30000});const stat=fs.statSync(zp);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':stat.size,'Content-Disposition':`attachment; filename="${h}.zip"`});const stream=fs.createReadStream(zp);stream.pipe(res);stream.on('end',()=>{try{fs.unlinkSync(zp)}catch(e){}})}catch(e){res.writeHead(500);res.end('ZIP failed: '+e.message)}return}
   if(u.pathname.startsWith('/api/download/')){const f=path.join(OUTPUT,u.pathname.replace('/api/download/',''));if(fs.existsSync(f)){res.writeHead(200,{'Content-Type':'image/png','Content-Disposition':`attachment; filename="${path.basename(f)}"`});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
