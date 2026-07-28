@@ -107,7 +107,9 @@ async function scrapeX(url,token,maxCount){
       const f=[];document.querySelectorAll('[data-testid="tweet"]').forEach(a=>{
         const t=a.querySelector('[data-testid="tweetText"]')?.innerText||'';
         if(!t||f.some(x=>x.text===t))return;
-        f.push({text:t,date:(a.querySelector('time')?.getAttribute('datetime')||'').split('T')[0],aria:a.querySelector('[role="group"]')?.getAttribute('aria-label')||''});
+        const link=a.querySelector('a[href*="/status/"]');
+        const href=link?link.getAttribute('href'):'';
+        f.push({text:t,date:(a.querySelector('time')?.getAttribute('datetime')||'').split('T')[0],aria:a.querySelector('[role="group"]')?.getAttribute('aria-label')||'',href});
       });return f;
     });
     np.filter(x=>isGoodPost(x.text)).forEach(x=>{const k=x.text.substring(0,50);if(!posts.has(k))posts.set(k,x)});
@@ -115,7 +117,7 @@ async function scrapeX(url,token,maxCount){
     await p.evaluate(()=>window.scrollBy(0,3000));await new Promise(r=>setTimeout(r,1200));
   }
   await b.close();
-  return{handle,posts:[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text)}))};
+  return{handle,posts:[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:''}))};
 }
 
 // ============================================================
@@ -163,6 +165,7 @@ function genPreview(jobDir,handle,posts){
     <div class="tags">${p.tags.split(' ').map(t=>`<span class="t">${t}</span>`).join('')}</div>
     <div class="actions">
       <a class="dl" href="/api/download/${handle}/imgs/card_${n}.png" download>⬇️</a>
+      ${p.link?`<a class="dl" href="${p.link}" target="_blank" style="background:#1d9bf0">🔗</a>`:''}
       <button class="pub" onclick="togglePub(${i})" id="btn${i}">📌</button>
     </div>
   </div></div>\n`});
