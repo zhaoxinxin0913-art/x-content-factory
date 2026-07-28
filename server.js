@@ -117,7 +117,35 @@ async function scrapeX(url,token,maxCount){
     await p.evaluate(()=>window.scrollBy(0,3000));await new Promise(r=>setTimeout(r,1200));
   }
   await b.close();
-  return{handle,posts:[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:''}))};
+  const postList=[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:'',comments:[]}));
+  // 抓取每条帖子的 top 3 评论
+  if(postList.some(p=>p.link)){
+    const b2=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage']});
+    const p2=await b2.newPage();await p2.setViewport({width:1280,height:900});
+    await p2.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
+    await p2.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
+    await new Promise(r=>setTimeout(r,800));
+    for(const post of postList){
+      if(!post.link)continue;
+      try{
+        await p2.goto(post.link,{waitUntil:'domcontentloaded',timeout:20000});
+        await p2.waitForSelector('[data-testid="tweet"]',{timeout:10000});
+        await new Promise(r=>setTimeout(r,1500));
+        const cmts=await p2.evaluate(()=>{
+          const tweets=[...document.querySelectorAll('article[data-testid="tweet"]')];
+          return tweets.slice(1,6).map(t=>{
+            const text=t.querySelector('[data-testid="tweetText"]')?.innerText||'';
+            const aria=t.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
+            const likes=parseInt(((aria.match(/(\d[\d,]*)\s*like/)||['','0'])[1]).replace(/,/g,''))||0;
+            return{text:text.substring(0,200),likes};
+          }).filter(c=>c.text.length>3).sort((a,b)=>b.likes-a.likes).slice(0,3);
+        });
+        post.comments=cmts;
+      }catch(e){/* skip this post's comments */}
+    }
+    await b2.close();
+  }
+  return{handle,posts:postList};
 }
 
 // ============================================================
@@ -161,6 +189,7 @@ function genPreview(jobDir,handle,posts){
   <div class="body">
     <div class="th">🇹🇭 ${p.q}</div>
     <div class="cn">🇨🇳 ${p.cn||'—'}</div>
+    ${p.comments&&p.comments.length?`<div class="cmts"><div class="cmts-title">💬 热门评论</div>${p.comments.map(c=>`<div class="cmt"><span class="cmt-text">${c.text.replace(/\n/g,' ').substring(0,100)}</span><span class="cmt-likes">❤️${c.likes}</span></div>`).join('')}</div>`:''}
     <div class="aria">${p.aria}</div>
     <div class="tags">${p.tags.split(' ').map(t=>`<span class="t">${t}</span>`).join('')}</div>
     <div class="actions">
@@ -185,6 +214,11 @@ h1{font-size:24px;text-align:center;color:#000;margin-bottom:4px}
 .body{padding:18px 22px;display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
 .th{font-size:16px;font-weight:700;line-height:1.5;color:#000;word-break:break-word}
 .cn{font-size:14px;color:#666;line-height:1.5;border-left:3px solid #e0e0e0;padding-left:10px;margin:4px 0}
+.cmts{background:#f8f8f8;border-radius:8px;padding:10px 12px;margin:4px 0}
+.cmts-title{font-size:11px;color:#999;font-weight:600;margin-bottom:6px}
+.cmt{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:5px;font-size:12px;line-height:1.4}
+.cmt-text{color:#333;flex:1}
+.cmt-likes{color:#999;font-size:11px;white-space:nowrap}
 .aria{color:#bbb;font-size:11px}
 .tags{display:flex;flex-wrap:wrap;gap:4px}
 .t{background:#f3f3f3;color:#888;padding:2px 8px;border-radius:4px;font-size:11px}
