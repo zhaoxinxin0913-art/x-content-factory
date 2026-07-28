@@ -151,13 +151,14 @@ async function screenshotCards(jobDir){
 }
 
 function genPreview(jobDir,handle,posts){
+  const fontCSS=fs.readFileSync(path.join(__dirname,'fonts','font-face.css'),'utf8');
   let blocks='';
   posts.forEach((p,i)=>{const n=String(i+1).padStart(3,'0');
     blocks+=`<div class="post" id="post${i}">
   <img src="imgs/card_${n}.png" style="width:200px;height:267px;object-fit:cover;flex-shrink:0;border-radius:8px 0 0 8px">
   <div class="body">
-    <div class="th">${p.q}</div>
-    <div class="cn">${p.cn||''}</div>
+    <div class="th">🇹🇭 ${p.q}</div>
+    <div class="cn">🇨🇳 ${p.cn||'—'}</div>
     <div class="aria">${p.aria}</div>
     <div class="tags">${p.tags.split(' ').map(t=>`<span class="t">${t}</span>`).join('')}</div>
     <div class="actions">
@@ -167,8 +168,9 @@ function genPreview(jobDir,handle,posts){
   </div></div>\n`});
   const html=`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>@${handle} 素材包</title><style>
+${fontCSS}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#fafafa;color:#1a1a1a;font-family:-apple-system,'Noto Sans Thai',sans-serif;padding:24px}
+body{background:#fafafa;color:#1a1a1a;font-family:'Noto Sans Thai',-apple-system,sans-serif;padding:24px}
 h1{font-size:24px;text-align:center;color:#000;margin-bottom:4px}
 .sub{text-align:center;color:#999;margin-bottom:18px;font-size:14px}
 .top-bar{display:flex;gap:8px;justify-content:center;margin-bottom:28px;flex-wrap:wrap}
@@ -179,7 +181,7 @@ h1{font-size:24px;text-align:center;color:#000;margin-bottom:4px}
 .post img{width:200px;height:267px;object-fit:cover;flex-shrink:0;border-right:1px solid #f0f0f0}
 .body{padding:18px 22px;display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
 .th{font-size:16px;font-weight:700;line-height:1.5;color:#000;word-break:break-word}
-.cn{font-size:14px;color:#666;line-height:1.5}
+.cn{font-size:14px;color:#666;line-height:1.5;border-left:3px solid #e0e0e0;padding-left:10px;margin:4px 0}
 .aria{color:#bbb;font-size:11px}
 .tags{display:flex;flex-wrap:wrap;gap:4px}
 .t{background:#f3f3f3;color:#888;padding:2px 8px;border-radius:4px;font-size:11px}
