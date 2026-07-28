@@ -126,9 +126,18 @@ function genCards(jobDir,posts){
   posts.forEach((p,i)=>{const s=STYLES[i%STYLES.length];cards+=`<div class="card ${s.cls}"><div class="q">${p.q}</div></div>\n`});
   fs.writeFileSync(path.join(jobDir,'cards.html'),`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><style>
 ${fontCSS}
-*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-wrap:wrap;gap:20px;padding:20px;justify-content:center}
-.card{width:900px;height:1200px;border-radius:36px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:80px 70px}
-.q{font-size:60px;font-weight:800;line-height:1.4;text-align:center}${css}</style></head><body>${cards}</body></html>`,'utf8');
+*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-wrap:wrap;gap:14px;padding:20px;justify-content:center}
+.card{width:280px;height:373px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:24px 20px;cursor:pointer;transition:transform .2s}
+.card:hover{transform:scale(1.03)}
+.q{font-size:18px;font-weight:800;line-height:1.4;text-align:center}
+.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal .big{width:900px;height:1200px;max-width:90vw;max-height:90vh;border-radius:36px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:80px 70px;object-fit:contain}
+.modal .big .q{font-size:60px}
+.modal .close{position:fixed;top:20px;right:30px;color:#fff;font-size:32px;cursor:pointer;z-index:1000}
+${css}</style></head><body>${cards}
+<div class="modal" id="modal" onclick="this.classList.remove('show')"><span class="close">✕</span><div class="big" id="bigCard"></div></div>
+<script>document.querySelectorAll('.card').forEach(c=>c.onclick=()=>{const m=document.getElementById('modal'),b=document.getElementById('bigCard');b.className='big '+c.className.replace('card ','');b.innerHTML=c.innerHTML;m.classList.add('show')})</script></body></html>`,'utf8');
 }
 
 async function screenshotCards(jobDir){
