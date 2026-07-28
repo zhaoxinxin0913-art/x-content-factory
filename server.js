@@ -43,26 +43,40 @@ function tagText(t){
 }
 
 function basicCN(t){
-  const m={แฟน:'对象',โสด:'单身',ความรัก:'爱情',เลิก:'分手',จีบ:'追',แต่งงาน:'结婚',หย่า:'离婚',คบ:'交往',หึง:'吃醋',คิดถึง:'想念',รัก:'爱',เหงา:'寂寞',หัวใจ:'心',ความสัมพันธ์:'关系',มาตรฐาน:'标准',อยากรู้:'想知道',
-  งาน:'工作',ลาออก:'辞职',เพื่อนร่วมงาน:'同事',เจ้านาย:'老板',สัมภาษณ์:'面试',เงินเดือน:'工资',ออฟฟิศ:'办公室',ธุรกิจ:'生意',
-  อาหาร:'美食',กิน:'吃',ขนม:'零食',เซเว่น:'711',ร้าน:'店',คาเฟ่:'咖啡馆',กาแฟ:'咖啡',ชานม:'奶茶',เค้ก:'蛋糕',อร่อย:'好吃',เมนู:'菜单',
-  ฟิค:'同人小说',นิยาย:'小说',หนัง:'电影',ซีรีย์:'剧集',อนิเมะ:'动漫',เพลง:'歌',ฟัง:'听',
-  ท่องเที่ยว:'旅行',เที่ยว:'玩',บิน:'飞',เกาหลี:'韩国',ญี่ปุ่น:'日本',ฮ่องกง:'香港',ต่างประเทศ:'国外',
-  เพื่อน:'朋友',ครอบครัว:'家人',พ่อ:'爸爸',แม่:'妈妈',พี่:'哥姐',น้อง:'弟妹',
-  เงิน:'钱',ลงทุน:'投资',ออม:'存钱',หนี้:'债',ค่าใช้จ่าย:'开支',ประกัน:'保险',
-  สุขภาพ:'健康',ป่วย:'生病',หมอ:'医生',กินยา:'吃药',ออกกำลัง:'运动',วิ่ง:'跑步',กีฬา:'运动',ผอม:'瘦',อ้วน:'胖',
-  บ้าน:'家/房子',รถ:'车',ขับ:'开车',คอนโด:'公寓',
-  สัตว์เลี้ยง:'宠物',หมา:'狗',แมว:'猫',น่ารัก:'可爱',
-  โทรศัพท์:'手机',ไอโฟน:'iPhone',แอพ:'App',เกม:'游戏',
-  ชีวิต:'人生',ฝัน:'梦想',เป้าหมาย:'目标',ประสบการณ์:'经验',เรียนรู้:'学习',สอบ:'考试',มหาลัย:'大学',
-  ร้องไห้:'哭',ความรู้สึก:'感受',เศร้า:'难过',ดีใจ:'开心',กลัว:'害怕',โกรธ:'生气',เครียด:'压力',
-  ตลก:'搞笑',ข่าว:'新闻',สังคม:'社会',การเมือง:'政治',
-  หอม:'香',สวย:'漂亮',ทรงผม:'发型',ผิว:'皮肤',ครีม:'面霜',น้ำหอม:'香水',แฟชั่น:'时尚',เสื้อผ้า:'衣服',
-  วันเกิด:'生日',ของขวัญ:'礼物',ปาร์ตี้:'派对',
-  รอยสัก:'纹身',AI:'AI',โซเชียล:'社交媒体',ไวรัล:'病毒式传播'};
+  // 保留作为 fallback，实际翻译在 translatePosts() 中完成
+  const m={แฟน:'对象',โสด:'单身',ความรัก:'爱情',เลิก:'分手',จีบ:'追',แต่งงาน:'结婚',คบ:'交往',คิดถึง:'想念',รัก:'爱',
+  งาน:'工作',ลาออก:'辞职',เจ้านาย:'老板',เงินเดือน:'工资',
+  อาหาร:'美食',กิน:'吃',ร้าน:'店',คาเฟ่:'咖啡馆',เค้ก:'蛋糕',อร่อย:'好吃',
+  เพื่อน:'朋友',ครอบครัว:'家人',พ่อ:'爸爸',แม่:'妈妈',
+  ชีวิต:'人生',ประสบการณ์:'经验',มาตรฐาน:'标准',อยากรู้:'想知道',วันเกิด:'生日'};
   let cn='';
   for(const[k,v] of Object.entries(m)) if(t.includes(k)) cn+=v+' ';
   return cn.trim()||'';
+}
+
+// Google Translate 免费 API 翻译
+const https=require('https');
+function translateText(text,sl='th',tl='zh-CN'){
+  return new Promise((resolve)=>{
+    const encoded=encodeURIComponent(text.substring(0,500));
+    const url=`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encoded}`;
+    https.get(url,(res)=>{
+      let d='';res.on('data',c=>d+=c);res.on('end',()=>{
+        try{const j=JSON.parse(d);resolve(j[0].map(x=>x[0]).join(''))}catch(e){resolve('')}
+      });
+    }).on('error',()=>resolve(''));
+  });
+}
+
+async function translatePosts(posts){
+  for(const p of posts){
+    if(p.cn&&p.cn.length>20)continue; // 已有完整翻译(>20字)则跳过
+    try{
+      const translated=await translateText(p.q);
+      if(translated&&translated.length>5)p.cn=translated;
+    }catch(e){/* keep basicCN fallback */}
+    await new Promise(r=>setTimeout(r,300)); // 避免请求过快
+  }
 }
 
 function analyzeStyle(posts){
@@ -528,6 +542,11 @@ const server=http.createServer(async(req,res)=>{
         // 应用已有翻译
         const tf=path.join(jobDir,'translations.json');
         if(fs.existsSync(tf)){const tmap=JSON.parse(fs.readFileSync(tf,'utf8'));data.posts.forEach(p=>{const q=p.q;let best='',bk='';for(const[k,v]of Object.entries(tmap)){if(q.startsWith(k.substring(0,Math.min(40,k.length)))&&k.length>bk.length){bk=k;best=v}}if(best)p.cn=best})}
+        await translatePosts(data.posts);
+        // 保存翻译缓存 + 更新 posts.json
+        const tmap2={};data.posts.forEach(p=>{if(p.cn&&p.cn.length>5)tmap2[p.q.substring(0,40)]=p.cn});
+        fs.writeFileSync(path.join(jobDir,'translations.json'),JSON.stringify({...(fs.existsSync(tf)?JSON.parse(fs.readFileSync(tf,'utf8')):{}),...tmap2},null,2));
+        fs.writeFileSync(path.join(jobDir,'posts.json'),JSON.stringify(data.posts,null,2));
         genCards(jobDir,data.posts);const imgCount=await screenshotCards(jobDir);
         genPreview(jobDir,handle,data.posts);
         const analysis=analyzeStyle(data.posts);
@@ -560,7 +579,7 @@ const server=http.createServer(async(req,res)=>{
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
     });return;
   }
-  if(u.pathname.startsWith('/output/')){const f=path.join(OUTPUT,u.pathname.replace('/output/',''));if(fs.existsSync(f)){const m={'html':'text/html','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','json':'application/json','mp4':'video/mp4','webm':'video/webm'};res.writeHead(200,{'Content-Type':m[path.extname(f).slice(1)]||'application/octet-stream'});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
+  if(u.pathname.startsWith('/output/')){const f=path.join(OUTPUT,u.pathname.replace('/output/',''));if(fs.existsSync(f)){if(fs.statSync(f).isDirectory()){const files=fs.readdirSync(f).map(x=>`<li><a href="${u.pathname}${u.pathname.endsWith('/')?'':'/'}${x}">${x}</a></li>`).join('');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Files</title></head><body><h2>📁 ${u.pathname}</h2><ul>${files}</ul></body></html>`)}else{const m={'html':'text/html; charset=utf-8','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','json':'application/json; charset=utf-8','mp4':'video/mp4','webm':'video/webm'};res.writeHead(200,{'Content-Type':m[path.extname(f).slice(1)]||'application/octet-stream'});fs.createReadStream(f).pipe(res)}}else{res.writeHead(404);res.end()}return}
   if(u.pathname==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({status:'ok',time:new Date().toISOString()}));return}
   if(u.pathname.startsWith('/api/zip/')){const h=u.pathname.split('/')[3],jd=path.join(OUTPUT,h);if(!fs.existsSync(jd)){res.writeHead(404);res.end();return}const{execSync}=require('child_process'),zp=path.join(OUTPUT,h+'.zip');try{try{fs.unlinkSync(zp)}catch(e){}execSync(`cd "${OUTPUT}" && zip -rq "${h}.zip" "${h}" -x "*.js"`,{stdio:'ignore',timeout:30000});const stat=fs.statSync(zp);res.writeHead(200,{'Content-Type':'application/zip','Content-Length':stat.size,'Content-Disposition':`attachment; filename="${h}.zip"`});const stream=fs.createReadStream(zp);stream.pipe(res);stream.on('end',()=>{try{fs.unlinkSync(zp)}catch(e){}})}catch(e){res.writeHead(500);res.end('ZIP failed: '+e.message)}return}
   if(u.pathname.startsWith('/api/download/')){const f=path.join(OUTPUT,u.pathname.replace('/api/download/',''));if(fs.existsSync(f)){res.writeHead(200,{'Content-Type':'image/png','Content-Disposition':`attachment; filename="${path.basename(f)}"`});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
