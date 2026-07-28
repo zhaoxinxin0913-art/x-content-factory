@@ -69,13 +69,16 @@ function translateText(text,sl='th',tl='zh-CN'){
 }
 
 async function translatePosts(posts){
-  for(const p of posts){
-    if(p.cn&&p.cn.length>20)continue; // 已有完整翻译(>20字)则跳过
-    try{
-      const translated=await translateText(p.q);
-      if(translated&&translated.length>5)p.cn=translated;
-    }catch(e){/* keep basicCN fallback */}
-    await new Promise(r=>setTimeout(r,300)); // 避免请求过快
+  // 并行翻译（每批5条）
+  for(let i=0;i<posts.length;i+=5){
+    const batch=posts.slice(i,i+5).filter(p=>!p.cn||p.cn.length<=20);
+    await Promise.all(batch.map(async p=>{
+      try{
+        const translated=await translateText(p.q);
+        if(translated&&translated.length>5)p.cn=translated;
+      }catch(e){}
+    }));
+    if(i+5<posts.length)await new Promise(r=>setTimeout(r,200));
   }
 }
 
@@ -132,15 +135,19 @@ async function scrapeX(url,token,maxCount){
   }
   await b.close();
   const postList=[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:'',comments:[]}));
-  // 抓取每条帖子的 top 3 评论
-  if(postList.some(p=>p.link)){
+  // 只对互动量 Top 5 的帖子抓评论
+  const ranked=[...postList].filter(p=>p.link).sort((a,b)=>{
+    const va=parseInt(((a.aria||'').match(/(\d[\d,]*)\s*view/)||['','0'])[1].replace(/,/g,''))||0;
+    const vb=parseInt(((b.aria||'').match(/(\d[\d,]*)\s*view/)||['','0'])[1].replace(/,/g,''))||0;
+    return vb-va;
+  }).slice(0,5);
+  if(ranked.length){
     const b2=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage']});
     const p2=await b2.newPage();await p2.setViewport({width:1280,height:900});
     await p2.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
     await p2.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
     await new Promise(r=>setTimeout(r,800));
-    for(const post of postList){
-      if(!post.link)continue;
+    for(const post of ranked){
       try{
         await p2.goto(post.link,{waitUntil:'domcontentloaded',timeout:20000});
         await p2.waitForSelector('[data-testid="tweet"]',{timeout:10000});
