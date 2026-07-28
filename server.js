@@ -150,16 +150,27 @@ async function scrapeX(url,token,maxCount){
 
 // ============================================================
 function genCards(jobDir,posts){
-  let css='',cards='';
+  let css='',cards='',fullCards='';
   const fontCSS=fs.readFileSync(path.join(__dirname,'fonts','font-face.css'),'utf8');
   STYLES.forEach(s=>css+=`.${s.cls}{${s.css}}.${s.cls} .q{${s.txt}}\n`);
-  posts.forEach((p,i)=>{const s=STYLES[i%STYLES.length];cards+=`<div class="card ${s.cls}"><div class="q">${p.q}</div></div>\n`});
+  posts.forEach((p,i)=>{const s=STYLES[i%STYLES.length];
+    cards+=`<div class="card ${s.cls}"><div class="q">${p.q}</div></div>\n`;
+    fullCards+=`<div class="card ${s.cls}"><div class="q">${p.q}</div></div>\n`;
+  });
+  // 截图用 HTML（900×1200 原始尺寸）
+  fs.writeFileSync(path.join(jobDir,'cards_full.html'),`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><style>
+${fontCSS}
+*{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-wrap:wrap;gap:20px;padding:20px;justify-content:center}
+.card{width:900px;height:1200px;border-radius:36px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:80px 70px;overflow:hidden}
+.q{font-size:60px;font-weight:800;line-height:1.4;text-align:center;overflow:hidden;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical}
+${css}</style></head><body>${fullCards}</body></html>`,'utf8');
+  // 浏览用 HTML（缩略图网格）
   fs.writeFileSync(path.join(jobDir,'cards.html'),`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><style>
 ${fontCSS}
 *{margin:0;padding:0;box-sizing:border-box}body{background:#111;display:flex;flex-wrap:wrap;gap:14px;padding:20px;justify-content:center}
-.card{width:280px;height:373px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:24px 20px;cursor:pointer;transition:transform .2s}
+.card{width:280px;height:373px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:24px 20px;cursor:pointer;transition:transform .2s;overflow:hidden}
 .card:hover{transform:scale(1.03)}
-.q{font-size:18px;font-weight:800;line-height:1.4;text-align:center}
+.q{font-size:18px;font-weight:800;line-height:1.4;text-align:center;overflow:hidden;display:-webkit-box;-webkit-line-clamp:12;-webkit-box-orient:vertical}
 .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center}
 .modal.show{display:flex}
 .modal .big{width:900px;height:1200px;max-width:90vw;max-height:90vh;border-radius:36px;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans Thai',sans-serif;padding:80px 70px;object-fit:contain}
@@ -171,7 +182,7 @@ ${css}</style></head><body>${cards}
 }
 
 async function screenshotCards(jobDir){
-  const cp=path.join(jobDir,'cards.html'),id=path.join(jobDir,'imgs');fs.existsSync(id)||fs.mkdirSync(id,{recursive:true});
+  const cp=path.join(jobDir,'cards_full.html'),id=path.join(jobDir,'imgs');fs.existsSync(id)||fs.mkdirSync(id,{recursive:true});
   const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']}),p=await b.newPage();
   await p.setViewport({width:1200,height:900});await p.goto(`file://${cp}`,{waitUntil:'networkidle0',timeout:30000});
   await p.evaluate(()=>document.fonts.ready);
