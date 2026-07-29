@@ -135,33 +135,6 @@ async function scrapeX(url,token,maxCount){
   }
   await b.close();
   const postList=[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:'',comments:[]}));
-  // 为所有帖子抓 top 3 评论
-  const ranked=postList.filter(p=>p.link);
-  if(ranked.length){
-    const b2=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage']});
-    const p2=await b2.newPage();await p2.setViewport({width:1280,height:900});
-    await p2.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
-    await p2.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-    await new Promise(r=>setTimeout(r,800));
-    for(const post of ranked){
-      try{
-        await p2.goto(post.link,{waitUntil:'domcontentloaded',timeout:15000});
-        await p2.waitForSelector('[data-testid="tweet"]',{timeout:8000});
-        await new Promise(r=>setTimeout(r,1000));
-        const cmts=await p2.evaluate(()=>{
-          const tweets=[...document.querySelectorAll('article[data-testid="tweet"]')];
-          return tweets.slice(1,6).map(t=>{
-            const text=t.querySelector('[data-testid="tweetText"]')?.innerText||'';
-            const aria=t.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
-            const likes=parseInt(((aria.match(/(\d[\d,]*)\s*like/)||['','0'])[1]).replace(/,/g,''))||0;
-            return{text:text.substring(0,200),likes};
-          }).filter(c=>c.text.length>3).sort((a,b)=>b.likes-a.likes).slice(0,3);
-        });
-        post.comments=cmts;
-      }catch(e){/* skip this post's comments */}
-    }
-    await b2.close();
-  }
   return{handle,posts:postList};
 }
 
