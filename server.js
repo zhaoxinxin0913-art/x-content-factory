@@ -341,6 +341,7 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 <div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px">
   <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
   <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
+  <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('monitor')" data-i18n="tabMonitor">📡 监控</button>
 </div>
 <div id="tab-batch">
 <div class="box">
@@ -365,7 +366,24 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <input class="inp" id="mtoken" data-ph="phToken" placeholder="粘贴 auth_token">
   <button class="btn btn-go" id="mBtn" onclick="runMedia()" data-i18n="btnMedia">🎬 开始搬运</button>
 </div>
-<div class="result" id="mresult"></div><div class="log" id="mlog"></div></div></div>
+<div class="result" id="mresult"></div><div class="log" id="mlog"></div></div>
+<div id="tab-monitor" style="display:none">
+<div class="box">
+  <h2 data-i18n="monTitle">📡 博主监控</h2>
+  <p class="dsc" data-i18n="monDesc">输入博主列表（每行一个用户名），自动监控新帖并存档</p>
+  <textarea class="inp" id="monList" rows="5" style="resize:vertical" data-ph="phMon" placeholder="每行一个用户名，如：&#10;m4ilboq&#10;wtffrio&#10;pastloverwarm_"></textarea>
+  <h2 style="margin-top:14px" data-i18n="lblToken3">🔐 Auth Token</h2>
+  <input class="inp" id="monToken" data-ph="phToken" placeholder="粘贴 auth_token">
+  <div style="display:flex;gap:10px;margin:10px 0;align-items:center">
+    <span style="font-size:12px;color:#666" data-i18n="monFreq">监控频率：</span>
+    <select id="monFreq" style="padding:6px 12px;border-radius:6px;border:1.5px solid #ddd;font-size:13px">
+      <option value="60">每小时</option><option value="180">每3小时</option><option value="360">每6小时</option><option value="720">每12小时</option><option value="1440">每天</option>
+    </select>
+  </div>
+  <button class="btn btn-go" id="monBtn" onclick="saveMonitor()">💾 保存监控</button>
+  <button class="btn" style="margin-top:8px;background:#fff;color:#000;border:1.5px solid #000" onclick="runMonitorNow()">▶️ 立即执行一次</button>
+</div>
+<div class="result" id="monresult"></div><div class="log" id="monlog"></div></div></div>
 <script>
 const i18n={
   zh:{title:'X 内容工厂',subtitle:'输入链接 → 自动抓取 → 配图下载',tabBatch:'📋 批量抓取',tabMedia:'🎬 媒体搬运',lblUrl:'🔗 X 博主链接',phUrl:'https://x.com/博主用户名',lblToken:'🔐 Auth Token',lblToken2:'🔐 Auth Token',lblTokenDesc:'从 Chrome DevTools 复制',phToken:'粘贴 auth_token',howTo:'📖 怎么获取？',howToDetail:'1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制',lblCount:'数量',btnRun:'🚀 开始抓取',note:'仅用于访问公开帖子，不会存储',mediaTitle:'🎬 媒体搬运',mediaDesc:'输入单条帖子链接，提取文案、图片/视频、优质评论',phMediaUrl:'https://x.com/用户名/status/帖子ID',btnMedia:'🎬 开始搬运'},
@@ -416,6 +434,27 @@ async function run(){
 function showTab(t){
   document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
   document.getElementById('tab-media').style.display=t==='media'?'':'none';
+  document.getElementById('tab-monitor').style.display=t==='monitor'?'':'none';
+}
+async function saveMonitor(){
+  const list=document.getElementById('monList').value.trim(),token=document.getElementById('monToken').value.trim(),freq=document.getElementById('monFreq').value;
+  if(!list||!token)return alert('请填写博主列表和 auth_token');
+  const handles=list.split('\\n').map(x=>x.trim().replace('@','')).filter(Boolean);
+  const r=await fetch('/api/monitor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({handles,token,freq:parseInt(freq)})});
+  const d=await r.json();
+  const MR=document.getElementById('monresult');
+  MR.innerHTML='<h3>'+(d.error?'❌ '+d.error:'✅ 已保存 '+d.count+' 个博主监控（每'+freq+'分钟检查）')+'</h3>';
+  MR.classList.add('show');
+}
+async function runMonitorNow(){
+  const token=document.getElementById('monToken').value.trim();
+  if(!token)return alert('请填写 auth_token');
+  const MB=document.getElementById('monBtn'),MR=document.getElementById('monresult');
+  MB.disabled=true;MB.textContent='⏳ 执行中...';
+  const r=await fetch('/api/monitor/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+  const d=await r.json();
+  MR.innerHTML='<h3>'+(d.error?'❌ '+d.error:'✅ 监控完成：'+d.updated+' 个博主有新内容')+'</h3>';
+  MR.classList.add('show');MB.disabled=false;MB.textContent='💾 保存监控';
 }
 async function runMedia(){
   const u=document.getElementById('murl').value.trim(),t=document.getElementById('mtoken').value.trim();
@@ -433,8 +472,9 @@ async function runMedia(){
     MA('完成: '+d.images+' 张图'+(d.video?' + 视频':'')+' + '+d.comments+' 条优质评论','ok');
     let html='<h3>✅ 搬运完成</h3>';
     html+='<div class="stats"><div class="st"><div class="n">@'+d.handle+'</div><div class="l">博主</div></div><div class="st"><div class="n">'+d.images+'</div><div class="l">图片</div></div><div class="st"><div class="n">'+(d.video?'✅':'无')+'</div><div class="l">视频</div></div><div class="st"><div class="n">'+d.comments+'</div><div class="l">评论</div></div></div>';
-    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>原文：</strong><br>'+d.text.substring(0,200)+(d.text.length>200?'…':'')+'</div>';
-    html+='<div class="btns"><a href="'+d.outputDir+'data.json" target="_blank">📄 查看数据</a><a class="png" href="'+d.outputDir+'media/" target="_blank">📁 媒体文件</a></div>';
+    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>原文：</strong><br>'+d.text.substring(0,300)+(d.text.length>300?'…':'')+'</div>';
+    if(d.topComments&&d.topComments.length){html+='<div style="background:#f0f7ff;border-radius:8px;padding:12px;margin:10px 0;font-size:12px;line-height:1.6"><strong>💬 热门评论：</strong><br>'+d.topComments.map(c=>'• '+c.text.substring(0,80)+' <span style="color:#999">❤️'+c.likes+'</span>').join('<br>')+'</div>';}
+    html+='<div class="btns"><a href="'+d.zipUrl+'" download>📦 一键下载全部</a></div>';
     MR.innerHTML=html;MR.classList.add('show');
   }catch(e){MA(e.message,'err')}
   MB.disabled=false;MB.textContent='🎬 开始搬运';
@@ -578,13 +618,70 @@ const server=http.createServer(async(req,res)=>{
         res.end(JSON.stringify({
           handle,tweetId,
           text:result.post.text,
+          cn:result.post.text?'':'',
           images:result.downloadedImgs.length,
           video:!!result.videoFile,
           comments:result.topComments.length,
-          outputDir:`/output/_media/${handle}_${tweetId}/`
+          topComments:result.topComments.slice(0,3),
+          outputDir:`/output/_media/${handle}_${tweetId}/`,
+          zipUrl:`/api/zip/_media/${handle}_${tweetId}`
         }));
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
     });return;
+  }
+  // 监控 API
+  if(u.pathname==='/api/monitor'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',()=>{
+      try{
+        const{handles,token,freq}=JSON.parse(body);
+        if(!handles||!handles.length||!token)return res.end(JSON.stringify({error:'需要 handles 和 token'}));
+        const configPath=path.join(OUTPUT,'_monitor.json');
+        const config={handles,token,freq:freq||60,lastRun:0};
+        fs.writeFileSync(configPath,JSON.stringify(config,null,2));
+        // 启动/重启定时器
+        startMonitorTimer(config);
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,count:handles.length}));
+      }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
+    });return;
+  }
+  if(u.pathname==='/api/monitor/run'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
+      try{
+        const{token}=JSON.parse(body);
+        const configPath=path.join(OUTPUT,'_monitor.json');
+        if(!fs.existsSync(configPath))return res.end(JSON.stringify({error:'未设置监控列表'}));
+        const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
+        const t=token||config.token;
+        let updated=0;
+        for(const handle of config.handles){
+          try{
+            const data=await scrapeX(`https://x.com/${handle}`,t,10);
+            const jobDir=path.join(OUTPUT,handle);fs.existsSync(jobDir)||fs.mkdirSync(jobDir,{recursive:true});
+            // 检查是否有新帖
+            const oldPath=path.join(jobDir,'posts.json');
+            const oldPosts=fs.existsSync(oldPath)?JSON.parse(fs.readFileSync(oldPath,'utf8')):[];
+            const oldTexts=new Set(oldPosts.map(p=>p.q.substring(0,50)));
+            const newPosts=data.posts.filter(p=>!oldTexts.has(p.q.substring(0,50)));
+            if(newPosts.length>0){
+              const allPosts=[...newPosts,...oldPosts].slice(0,50);
+              await translatePosts(allPosts.filter(p=>!p.cn||p.cn.length<=20));
+              fs.writeFileSync(oldPath,JSON.stringify(allPosts,null,2));
+              genCards(jobDir,allPosts);await screenshotCards(jobDir);
+              genPreview(jobDir,handle,allPosts);
+              updated++;
+            }
+          }catch(e){/* skip failed handle */}
+        }
+        config.lastRun=Date.now();fs.writeFileSync(configPath,JSON.stringify(config,null,2));
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,updated}));
+      }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
+    });return;
+  }
+  if(u.pathname==='/api/monitor'&&req.method==='GET'){
+    const configPath=path.join(OUTPUT,'_monitor.json');
+    if(fs.existsSync(configPath)){res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(fs.readFileSync(configPath))}
+    else{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({handles:[],freq:60}))}
+    return;
   }
   if(u.pathname.startsWith('/output/')){const f=path.join(OUTPUT,u.pathname.replace('/output/',''));if(fs.existsSync(f)){if(fs.statSync(f).isDirectory()){const files=fs.readdirSync(f).map(x=>`<li><a href="${u.pathname}${u.pathname.endsWith('/')?'':'/'}${x}">${x}</a></li>`).join('');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Files</title></head><body><h2>📁 ${u.pathname}</h2><ul>${files}</ul></body></html>`)}else{const m={'html':'text/html; charset=utf-8','png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','json':'application/json; charset=utf-8','mp4':'video/mp4','webm':'video/webm'};res.writeHead(200,{'Content-Type':m[path.extname(f).slice(1)]||'application/octet-stream'});fs.createReadStream(f).pipe(res)}}else{res.writeHead(404);res.end()}return}
   if(u.pathname==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({status:'ok',time:new Date().toISOString()}));return}
@@ -592,5 +689,42 @@ const server=http.createServer(async(req,res)=>{
   if(u.pathname.startsWith('/api/download/')){const f=path.join(OUTPUT,u.pathname.replace('/api/download/',''));if(fs.existsSync(f)){res.writeHead(200,{'Content-Type':'image/png','Content-Disposition':`attachment; filename="${path.basename(f)}"`});fs.createReadStream(f).pipe(res)}else{res.writeHead(404);res.end()}return}
   res.writeHead(404);res.end();
 });
+
+// 定时监控
+let monitorInterval=null;
+function startMonitorTimer(config){
+  if(monitorInterval)clearInterval(monitorInterval);
+  const ms=(config.freq||60)*60*1000;
+  monitorInterval=setInterval(async()=>{
+    try{
+      const configPath=path.join(OUTPUT,'_monitor.json');
+      if(!fs.existsSync(configPath))return;
+      const cfg=JSON.parse(fs.readFileSync(configPath,'utf8'));
+      for(const handle of cfg.handles){
+        try{
+          const data=await scrapeX(`https://x.com/${handle}`,cfg.token,10);
+          const jobDir=path.join(OUTPUT,handle);fs.existsSync(jobDir)||fs.mkdirSync(jobDir,{recursive:true});
+          const oldPath=path.join(jobDir,'posts.json');
+          const oldPosts=fs.existsSync(oldPath)?JSON.parse(fs.readFileSync(oldPath,'utf8')):[];
+          const oldTexts=new Set(oldPosts.map(p=>p.q.substring(0,50)));
+          const newPosts=data.posts.filter(p=>!oldTexts.has(p.q.substring(0,50)));
+          if(newPosts.length>0){
+            const allPosts=[...newPosts,...oldPosts].slice(0,50);
+            await translatePosts(allPosts.filter(p=>!p.cn||p.cn.length<=20));
+            fs.writeFileSync(oldPath,JSON.stringify(allPosts,null,2));
+            genCards(jobDir,allPosts);await screenshotCards(jobDir);
+            genPreview(jobDir,handle,allPosts);
+            console.log(`📡 ${handle}: +${newPosts.length} 条新帖`);
+          }
+        }catch(e){}
+      }
+      cfg.lastRun=Date.now();fs.writeFileSync(configPath,JSON.stringify(cfg,null,2));
+    }catch(e){}
+  },ms);
+  console.log(`📡 监控已启动: ${config.handles.length} 个博主, 每${config.freq}分钟检查`);
+}
+// 启动时恢复已有监控
+const monConfigPath=path.join(OUTPUT,'_monitor.json');
+if(fs.existsSync(monConfigPath)){try{startMonitorTimer(JSON.parse(fs.readFileSync(monConfigPath,'utf8')))}catch(e){}}
 
 server.listen(PORT,async()=>{console.log(`\n🏭 X内容工厂 → http://localhost:${PORT}\n`);try{const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']});await b.close();console.log('✅ Puppeteer 就绪\n')}catch(e){console.log('⚠️ Puppeteer 预热失败(将在请求时重试):',e.message,'\n')}});
