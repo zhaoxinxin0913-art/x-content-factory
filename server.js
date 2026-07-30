@@ -307,21 +307,6 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 </style></head><body><div class="c">
 <div style="text-align:right;margin-bottom:-30px"><button class="btn" style="width:auto;padding:6px 14px;background:#f0f0f0;color:#333;font-size:11px;border:1px solid #ddd" onclick="toggleLang()" id="langBtn">EN</button></div>
 <div class="hero"><h1 data-i18n="title">X 内容工厂</h1><p data-i18n="subtitle">输入链接 → 自动抓取 → 配图下载</p></div>
-<div id="ext-hint" style="background:#f0f7ff;border:1.5px solid #cce5ff;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#0066cc;text-align:center;display:none">
-  💡 安装 <strong>Token Helper 扩展</strong> 即可一键授权，无需手动复制 auth_token |
-  <a href="/extension/install.html" target="_blank" style="color:#0066cc;font-weight:700">安装教程</a>
-  <button onclick="document.getElementById('ext-hint').style.display='none'" style="background:none;border:none;color:#999;cursor:pointer;margin-left:8px">✕</button>
-</div>
-<div id="token-guide" style="background:#000;color:#fff;border-radius:12px;padding:20px 24px;margin-bottom:16px;text-align:center;position:relative">
-  <button onclick="document.getElementById('token-guide').style.display='none'" style="position:absolute;top:8px;right:12px;background:none;border:none;color:#888;font-size:18px;cursor:pointer">✕</button>
-  <div style="font-size:14px;font-weight:700;margin-bottom:10px">🔐 如何获取 Auth Token（只需做一次）</div>
-  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:12px;line-height:1.8">
-    <div style="background:#222;border-radius:8px;padding:10px 14px;text-align:center;min-width:130px"><span style="font-size:20px">1️⃣</span><br>打开<a href="https://x.com" target="_blank" style="color:#1d9bf0">x.com</a>并登录</div>
-    <div style="background:#222;border-radius:8px;padding:10px 14px;text-align:center;min-width:130px"><span style="font-size:20px">2️⃣</span><br>按 <code style="background:#444;padding:2px 6px;border-radius:4px">F12</code> → Application 标签 → Cookies → x.com</div>
-    <div style="background:#222;border-radius:8px;padding:10px 14px;text-align:center;min-width:130px"><span style="font-size:20px">3️⃣</span><br>找到 <code style="background:#444;padding:2px 6px;border-radius:4px">auth_token</code>，双击复制，<br>粘贴到下方输入框</div>
-  </div>
-  <div style="margin-top:10px;font-size:11px;color:#888">每个同事用自己的账号，安全不封号</div>
-</div>
 <div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px">
   <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
   <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
@@ -333,7 +318,10 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <input class="inp" id="url" data-ph="phUrl" placeholder="https://x.com/博主用户名">
   <h2 style="margin-top:14px" data-i18n="lblToken">🔐 Auth Token</h2>
   <p class="dsc" data-i18n="lblTokenDesc">从 Chrome DevTools 复制</p>
-  <input class="inp" id="token" data-ph="phToken" placeholder="粘贴 auth_token">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <input class="inp" id="token" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
+    <button class="btn" style="width:auto;padding:12px 18px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制 → 回来粘贴')">🔐 获取Token</button>
+  </div>
   <details><summary data-i18n="howTo">📖 怎么获取？</summary>
   <div data-i18n="howToDetail">1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制</div></details>
   <div class="range-wrap"><label><span data-i18n="lblCount">数量</span><span id="cnt">30</span></label><input type="range" id="count" min="10" max="100" value="30" oninput="document.getElementById('cnt').textContent=this.value"></div>
@@ -347,7 +335,10 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <p class="dsc" data-i18n="mediaDesc">输入单条帖子链接，提取文案、图片/视频、优质评论</p>
   <input class="inp" id="murl" data-ph="phMediaUrl" placeholder="https://x.com/用户名/status/帖子ID">
   <h2 style="margin-top:14px" data-i18n="lblToken2">🔐 Auth Token</h2>
-  <input class="inp" id="mtoken" data-ph="phToken" placeholder="粘贴 auth_token">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <input class="inp" id="mtoken" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
+    <button class="btn" style="width:auto;padding:12px 18px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制 → 回来粘贴')">🔐 获取Token</button>
+  </div>
   <button class="btn btn-go" id="mBtn" onclick="runMedia()" data-i18n="btnMedia">🎬 开始搬运</button>
 </div>
 <div class="result" id="mresult"></div><div class="log" id="mlog"></div></div>
@@ -357,7 +348,10 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <p class="dsc" data-i18n="monDesc">输入博主列表（每行一个用户名），自动监控新帖并存档</p>
   <textarea class="inp" id="monList" rows="5" style="resize:vertical" data-ph="phMon" placeholder="每行一个用户名，如：&#10;m4ilboq&#10;wtffrio&#10;pastloverwarm_"></textarea>
   <h2 style="margin-top:14px" data-i18n="lblToken3">🔐 Auth Token</h2>
-  <input class="inp" id="monToken" data-ph="phToken" placeholder="粘贴 auth_token">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <input class="inp" id="monToken" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
+    <button class="btn" style="width:auto;padding:12px 18px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制 → 回来粘贴')">🔐 获取Token</button>
+  </div>
   <div style="display:flex;gap:10px;margin:10px 0;align-items:center">
     <span style="font-size:12px;color:#666" data-i18n="monFreq">监控频率：</span>
     <select id="monFreq" style="padding:6px 12px;border-radius:6px;border:1.5px solid #ddd;font-size:13px">
