@@ -307,6 +307,21 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 </style></head><body><div class="c">
 <div style="text-align:right;margin-bottom:-30px"><button class="btn" style="width:auto;padding:6px 14px;background:#f0f0f0;color:#333;font-size:11px;border:1px solid #ddd" onclick="toggleLang()" id="langBtn">EN</button></div>
 <div class="hero"><h1 data-i18n="title">X 内容工厂</h1><p data-i18n="subtitle">输入链接 → 自动抓取 → 配图下载</p></div>
+<div id="ext-hint" style="background:#f0f7ff;border:1.5px solid #cce5ff;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#0066cc;text-align:center;display:none">
+  💡 安装 <strong>Token Helper 扩展</strong> 即可一键授权，无需手动复制 auth_token |
+  <a href="/extension/install.html" target="_blank" style="color:#0066cc;font-weight:700">安装教程</a>
+  <button onclick="document.getElementById('ext-hint').style.display='none'" style="background:none;border:none;color:#999;cursor:pointer;margin-left:8px">✕</button>
+</div>
+<div id="token-guide" style="background:#000;color:#fff;border-radius:12px;padding:20px 24px;margin-bottom:16px;text-align:center;position:relative">
+  <button onclick="document.getElementById('token-guide').style.display='none'" style="position:absolute;top:8px;right:12px;background:none;border:none;color:#888;font-size:18px;cursor:pointer">✕</button>
+  <div style="font-size:14px;font-weight:700;margin-bottom:10px">🔐 如何获取 Auth Token（只需做一次）</div>
+  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:12px;line-height:1.8">
+    <div style="background:#222;border-radius:8px;padding:10px 14px;text-align:center;min-width:130px"><span style="font-size:20px">1️⃣</span><br>打开<a href="https://x.com" target="_blank" style="color:#1d9bf0">x.com</a>并登录</div>
+    <div style="background:#222;border-radius:8px;padding:10px 14px;text-align:center;min-width:130px"><span style="font-size:20px">2️⃣</span><br>按 <code style="background:#444;padding:2px 6px;border-radius:4px">F12</code> → Application 标签 → Cookies → x.com</div>
+    <div style="background:#222;border-radius:8px;padding:10px 14px;text-align:center;min-width:130px"><span style="font-size:20px">3️⃣</span><br>找到 <code style="background:#444;padding:2px 6px;border-radius:4px">auth_token</code>，双击复制，<br>粘贴到下方输入框</div>
+  </div>
+  <div style="margin-top:10px;font-size:11px;color:#888">每个同事用自己的账号，安全不封号</div>
+</div>
 <div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px">
   <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
   <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
