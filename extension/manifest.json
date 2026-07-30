@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "X 内容工厂 Token Helper",
+  "version": "1.0",
+  "description": "一键获取 X auth_token，自动填入内容工厂",
+  "permissions": ["cookies"],
+  "host_permissions": ["https://x.com/*", "https://*.trycloudflare.com/*", "http://localhost:5050/*", "https://x-content-factory-production.up.railway.app/*"],
+  "content_scripts": [{
+    "matches": ["https://*.trycloudflare.com/*", "http://localhost:5050/*", "https://x-content-factory-production.up.railway.app/*"],
+    "js": ["inject.js"],
+    "run_at": "document_end"
+  }]
+}
