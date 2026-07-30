@@ -320,7 +320,8 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <p class="dsc" data-i18n="lblTokenDesc">从 Chrome DevTools 复制</p>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <input class="inp" id="token" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
-    <button class="btn" style="width:auto;padding:12px 18px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制 → 回来粘贴')">🔐 获取Token</button>
+    <button class="btn" style="width:auto;padding:12px 14px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制')">🔐 获取Token</button>
+    <button class="btn" style="width:auto;padding:12px 14px;background:#333;color:#fff;font-size:13px;white-space:nowrap" onclick="pasteToken('token',this)">📋 粘贴</button>
   </div>
   <details><summary data-i18n="howTo">📖 怎么获取？</summary>
   <div data-i18n="howToDetail">1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制</div></details>
@@ -337,7 +338,8 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <h2 style="margin-top:14px" data-i18n="lblToken2">🔐 Auth Token</h2>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <input class="inp" id="mtoken" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
-    <button class="btn" style="width:auto;padding:12px 18px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制 → 回来粘贴')">🔐 获取Token</button>
+    <button class="btn" style="width:auto;padding:12px 14px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制')">🔐 获取Token</button>
+    <button class="btn" style="width:auto;padding:12px 14px;background:#333;color:#fff;font-size:13px;white-space:nowrap" onclick="pasteToken('mtoken',this)">📋 粘贴</button>
   </div>
   <button class="btn btn-go" id="mBtn" onclick="runMedia()" data-i18n="btnMedia">🎬 开始搬运</button>
 </div>
@@ -350,7 +352,8 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <h2 style="margin-top:14px" data-i18n="lblToken3">🔐 Auth Token</h2>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <input class="inp" id="monToken" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
-    <button class="btn" style="width:auto;padding:12px 18px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制 → 回来粘贴')">🔐 获取Token</button>
+    <button class="btn" style="width:auto;padding:12px 14px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制')">🔐 获取Token</button>
+    <button class="btn" style="width:auto;padding:12px 14px;background:#333;color:#fff;font-size:13px;white-space:nowrap" onclick="pasteToken('monToken',this)">📋 粘贴</button>
   </div>
   <div style="display:flex;gap:10px;margin:10px 0;align-items:center">
     <span style="font-size:12px;color:#666" data-i18n="monFreq">监控频率：</span>
@@ -456,6 +459,13 @@ async function runMedia(){
     MR.innerHTML=html;MR.classList.add('show');
   }catch(e){MA(e.message,'err')}
   MB.disabled=false;MB.textContent='🎬 开始搬运';
+}
+async function pasteToken(inputId,btn){
+  try{
+    const text=await navigator.clipboard.readText();
+    if(text&&text.length>10){document.getElementById(inputId).value=text;btn.textContent='✅';btn.style.background='#00ba7c';setTimeout(()=>{btn.textContent='📋 粘贴';btn.style.background='#333'},2000)}
+    else{alert('剪贴板中没有检测到 token，请先在 X 页面复制 auth_token')}
+  }catch(e){alert('读取剪贴板失败（需要 HTTPS），请手动粘贴: '+e.message)}
 }
 </script></body></html>`;
 
