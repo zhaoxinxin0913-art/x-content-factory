@@ -463,7 +463,7 @@ async function runMedia(){
         const ext=p.split('.').pop();
         html+='<div style="position:relative;border:1px solid #ddd;border-radius:6px;overflow:hidden;background:#fff">';
         html+='<img src="'+url+'" style="width:100%;height:auto;display:block" loading="lazy">';
-        html+='<button onclick="downloadFile(\''+url+'\','+( i+1)+',\''+ext+'\')" style="position:absolute;bottom:6px;right:6px;padding:5px 10px;background:rgba(0,0,0,0.75);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700">⬇️ 下载</button>';
+        html+='<button onclick="downloadFile(&quot;'+url+'&quot;,'+(i+1)+',&quot;'+ext+'&quot;)" style="position:absolute;bottom:6px;right:6px;padding:5px 10px;background:rgba(0,0,0,0.75);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700">⬇️ 下载</button>';
         html+='</div>';
       });
       html+='</div>';
@@ -476,7 +476,7 @@ async function runMedia(){
       const ext=d.videoPath.split('.').pop();
       html+='<div style="position:relative;border:1px solid #ddd;border-radius:6px;overflow:hidden;background:#000;max-width:500px">';
       html+='<video src="'+vurl+'" controls style="width:100%;display:block"></video>';
-      html+='<button onclick="downloadFile(\''+vurl+'\',1,\''+ext+'\')" style="position:absolute;bottom:12px;right:12px;padding:6px 14px;background:rgba(0,0,0,0.8);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">⬇️ 下载视频</button>';
+      html+='<button onclick="downloadFile(&quot;'+vurl+'&quot;,1,&quot;'+ext+'&quot;)" style="position:absolute;bottom:12px;right:12px;padding:6px 14px;background:rgba(0,0,0,0.8);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">⬇️ 下载视频</button>';
       html+='</div>';
     }
     
