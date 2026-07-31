@@ -695,11 +695,19 @@ const server=http.createServer(async(req,res)=>{
         // 保存结果
         fs.writeFileSync(path.join(jobDir,'data.json'),JSON.stringify(result,null,2));
         
-        // 翻译正文（增加超时保护）
-        const cnText=await Promise.race([
-          translateText(result.post.text),
-          new Promise(resolve=>setTimeout(()=>resolve(result.post.text),5000))
-        ]).catch(()=>result.post.text);
+        // 翻译（可选，不阻塞响应）
+        const cnText=result.post.text; // 默认显示原文
+        translateText(result.post.text).then(t=>{
+          if(t&&t.length>5){
+            // 异步更新翻译结果到文件
+            try{
+              const dataFile=path.join(jobDir,'data.json');
+              const data=JSON.parse(fs.readFileSync(dataFile,'utf8'));
+              data.post.cnText=t;
+              fs.writeFileSync(dataFile,JSON.stringify(data,null,2));
+            }catch(e){}
+          }
+        }).catch(()=>{});
         
         // 分类
         const text=result.post.text.toLowerCase();
