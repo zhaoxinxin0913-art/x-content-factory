@@ -683,8 +683,11 @@ const server=http.createServer(async(req,res)=>{
         // 保存结果
         fs.writeFileSync(path.join(jobDir,'data.json'),JSON.stringify(result,null,2));
         
-        // 翻译正文
-        const cnText=await translateText(result.post.text).catch(()=>result.post.text);
+        // 翻译正文（增加超时保护）
+        const cnText=await Promise.race([
+          translateText(result.post.text),
+          new Promise(resolve=>setTimeout(()=>resolve(result.post.text),5000))
+        ]).catch(()=>result.post.text);
         
         // 分类
         const text=result.post.text.toLowerCase();
