@@ -566,6 +566,7 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return}
   if(u.pathname==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(INDEX);return}
   if(u.pathname==='/get-token'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'get-token.html')));return}
+  if(u.pathname==='/get-token-en'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'get-token-en.html')));return}
   if(u.pathname==='/api/run'&&req.method==='POST'){
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
       try{
