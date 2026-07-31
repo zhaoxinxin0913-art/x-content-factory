@@ -452,10 +452,40 @@ async function runMedia(){
     if(d.error){MA(d.error,'err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
     MA('完成: '+d.images+' 张图'+(d.video?' + 视频':'')+' + '+d.comments+' 条优质评论','ok');
     let html='<h3>✅ 搬运完成</h3>';
-    html+='<div class="stats"><div class="st"><div class="n">@'+d.handle+'</div><div class="l">博主</div></div><div class="st"><div class="n">'+d.images+'</div><div class="l">图片</div></div><div class="st"><div class="n">'+(d.video?'✅':'无')+'</div><div class="l">视频</div></div><div class="st"><div class="n">'+d.comments+'</div><div class="l">评论</div></div></div>';
     html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>原文：</strong><br>'+d.text.substring(0,300)+(d.text.length>300?'…':'')+'</div>';
-    if(d.topComments&&d.topComments.length){html+='<div style="background:#f0f7ff;border-radius:8px;padding:12px;margin:10px 0;font-size:12px;line-height:1.6"><strong>💬 热门评论：</strong><br>'+d.topComments.map(c=>'• '+c.text.substring(0,80)+' <span style="color:#999">❤️'+c.likes+'</span>').join('<br>')+'</div>';}
-    html+='<div class="btns"><a href="'+d.zipUrl+'" download>📦 一键下载全部</a></div>';
+    
+    // 图片预览
+    if(d.images>0&&d.imagePaths){
+      html+='<h4 style="margin:16px 0 8px 0;font-size:15px">📸 图片 ('+d.images+')</h4>';
+      html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">';
+      d.imagePaths.forEach((p,i)=>{
+        const url='/output/_media/'+d.handle+'_'+d.tweetId+'/'+p;
+        const ext=p.split('.').pop();
+        html+='<div style="position:relative;border:1px solid #ddd;border-radius:6px;overflow:hidden;background:#fff">';
+        html+='<img src="'+url+'" style="width:100%;height:auto;display:block" loading="lazy">';
+        html+='<button onclick="downloadFile(\''+url+'\','+( i+1)+',\''+ext+'\')" style="position:absolute;bottom:6px;right:6px;padding:5px 10px;background:rgba(0,0,0,0.75);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700">⬇️ 下载</button>';
+        html+='</div>';
+      });
+      html+='</div>';
+    }
+    
+    // 视频预览
+    if(d.video&&d.videoPath){
+      html+='<h4 style="margin:16px 0 8px 0;font-size:15px">🎬 视频</h4>';
+      const vurl='/output/_media/'+d.handle+'_'+d.tweetId+'/'+d.videoPath;
+      const ext=d.videoPath.split('.').pop();
+      html+='<div style="position:relative;border:1px solid #ddd;border-radius:6px;overflow:hidden;background:#000;max-width:500px">';
+      html+='<video src="'+vurl+'" controls style="width:100%;display:block"></video>';
+      html+='<button onclick="downloadFile(\''+vurl+'\',1,\''+ext+'\')" style="position:absolute;bottom:12px;right:12px;padding:6px 14px;background:rgba(0,0,0,0.8);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">⬇️ 下载视频</button>';
+      html+='</div>';
+    }
+    
+    // 评论
+    if(d.commentTexts&&d.commentTexts.length){
+      html+='<h4 style="margin:16px 0 8px 0;font-size:15px">💬 优质评论 ('+d.comments+')</h4>';
+      html+='<div style="background:#f0f7ff;border-radius:6px;padding:10px;font-size:12px;color:#666;line-height:1.8">'+d.commentTexts.map((c,i)=>(i+1)+'. '+c).join('<br>')+'</div>';
+    }
+    
     MR.innerHTML=html;MR.classList.add('show');
   }catch(e){MA(e.message,'err')}
   MB.disabled=false;MB.textContent='🎬 开始搬运';
@@ -466,6 +496,16 @@ async function pasteToken(inputId,btn){
     if(text&&text.length>10){document.getElementById(inputId).value=text;btn.textContent='✅';btn.style.background='#00ba7c';setTimeout(()=>{btn.textContent='📋 粘贴';btn.style.background='#333'},2000)}
     else{alert('剪贴板中没有检测到 token，请先在 X 页面复制 auth_token')}
   }catch(e){alert('读取剪贴板失败（需要 HTTPS），请手动粘贴: '+e.message)}
+}
+let downloadCounter=0;
+function downloadFile(url,index,ext){
+  const today=new Date().toISOString().slice(0,10).replace(/-/g,'');
+  downloadCounter++;
+  const filename=today+'_'+String(downloadCounter).padStart(2,'0')+'.'+ext;
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  a.click();
 }
 </script></body></html>`;
 
@@ -610,8 +650,11 @@ const server=http.createServer(async(req,res)=>{
           text:result.post.text,
           cn:result.post.text?'':'',
           images:result.downloadedImgs.length,
+          imagePaths:result.downloadedImgs.map(f=>path.basename(f)),
           video:!!result.videoFile,
+          videoPath:result.videoFile?path.basename(result.videoFile):'',
           comments:result.topComments.length,
+          commentTexts:result.topComments.slice(0,3).map(c=>c.text),
           topComments:result.topComments.slice(0,3),
           outputDir:`/output/_media/${handle}_${tweetId}/`,
           zipUrl:`/api/zip/_media/${handle}_${tweetId}`
