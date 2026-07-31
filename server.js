@@ -557,7 +557,19 @@ async function scrapePost(postUrl,token){
   await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
   await new Promise(r=>setTimeout(r,1000));
   await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
-  await p.waitForSelector('[data-testid="tweet"]',{timeout:30000});
+  
+  // 等待主推文加载（增加重试）
+  let tweetFound=false;
+  for(let i=0;i<3;i++){
+    try{
+      await p.waitForSelector('[data-testid="tweet"]',{timeout:10000});
+      tweetFound=true;
+      break;
+    }catch(e){
+      if(i<2){await new Promise(r=>setTimeout(r,3000));await p.reload({waitUntil:'domcontentloaded'});}
+    }
+  }
+  if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
   await new Promise(r=>setTimeout(r,2000));
 
   // 提取主帖内容
