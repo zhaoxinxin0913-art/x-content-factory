@@ -486,6 +486,29 @@ async function runMedia(){
       html+='<div style="background:#f0f7ff;border-radius:6px;padding:10px;font-size:12px;color:#666;line-height:1.8">'+d.commentTexts.map((c,i)=>(i+1)+'. '+c).join('<br>')+'</div>';
     }
     
+    // 表格记录
+    html+='<h4 style="margin:20px 0 10px 0;font-size:15px">📋 表格记录（可直接复制）</h4>';
+    html+='<table id="recordTable" style="width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #ddd"><thead><tr style="background:#f5f5f5">';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">X原文链接</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">帖子类别</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">中文翻译正文</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">原文</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">中文Tag</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">原文Tag</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">媒体内容</th>';
+    html+='<th style="border:1px solid #ddd;padding:8px;text-align:left">媒体类型</th>';
+    html+='</tr></thead><tbody><tr>';
+    html+='<td style="border:1px solid #ddd;padding:8px"><a href="'+d.postUrl+'" target="_blank" style="color:#1d9bf0">'+d.postUrl+'</a></td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.category+'</td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.cnText+'</td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.text.substring(0,100)+(d.text.length>100?'...':'')+'</td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.cnTags+'</td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.origTags+'</td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.images+' 张图片'+(d.video?' + 1 视频':'')+'</td>';
+    html+='<td style="border:1px solid #ddd;padding:8px">'+d.mediaType+'</td>';
+    html+='</tr></tbody></table>';
+    html+='<button onclick="copyTableToClipboard()" style="margin-top:10px;padding:8px 16px;background:#00ba7c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📋 复制表格</button>';
+    
     MR.innerHTML=html;MR.classList.add('show');
   }catch(e){MA(e.message,'err')}
   MB.disabled=false;MB.textContent='🎬 开始搬运';
@@ -506,6 +529,21 @@ function downloadFile(url,index,ext){
   a.href=url;
   a.download=filename;
   a.click();
+}
+function copyTableToClipboard(){
+  const table=document.getElementById('recordTable');
+  if(!table)return alert('表格未找到');
+  const range=document.createRange();
+  range.selectNode(table);
+  window.getSelection().removeAllRanges();
+  window.getSelection().addRange(range);
+  try{
+    document.execCommand('copy');
+    alert('✅ 表格已复制到剪贴板，直接粘贴到 Excel/Sheets 即可');
+  }catch(e){
+    alert('复制失败: '+e.message);
+  }
+  window.getSelection().removeAllRanges();
 }
 </script></body></html>`;
 
@@ -644,20 +682,47 @@ const server=http.createServer(async(req,res)=>{
         const result=await Promise.race([downloadMedia(url,token,jobDir),new Promise((_,rj)=>setTimeout(()=>rj(new Error('超时120秒')),120000))]);
         // 保存结果
         fs.writeFileSync(path.join(jobDir,'data.json'),JSON.stringify(result,null,2));
+        
+        // 翻译正文
+        const cnText=await translateText(result.post.text).catch(()=>result.post.text);
+        
+        // 分类
+        const text=result.post.text.toLowerCase();
+        let category='General';
+        if(text.match(/celebrity|star|famous|idol|演员|明星|นักแสดง|artis/i))category='Celebrity';
+        else if(text.match(/love|relationship|boyfriend|girlfriend|couple|แฟน|ความรัก|pacar|cinta/i))category='Relationship';
+        else if(text.match(/meme|funny|lol|joke|ตลก|lucu|meme/i))category='MEME';
+        else if(text.match(/news|breaking|report|ข่าว|berita/i))category='News';
+        else if(text.match(/food|recipe|eat|อาหาร|makanan/i))category='Food';
+        else if(text.match(/travel|trip|vacation|ท่องเที่ยว|wisata/i))category='Travel';
+        
+        // 生成tag
+        const cnTags=['#'+category];
+        const origTags=result.post.text.match(/#[\w\u0E00-\u0E7F]+/g)||[];
+        if(category==='Relationship')cnTags.push('#情感');
+        if(category==='MEME')cnTags.push('#搞笑');
+        if(category==='Food')cnTags.push('#美食');
+        
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify({
           handle,tweetId,
           text:result.post.text,
+          cnText,
+          category,
+          cnTags:cnTags.join(' '),
+          origTags:origTags.slice(0,5).join(' ')||'#'+category,
           cn:result.post.text?'':'',
           images:result.downloadedImgs.length,
           imagePaths:result.downloadedImgs.map(f=>path.basename(f)),
           video:!!result.videoFile,
           videoPath:result.videoFile?path.basename(result.videoFile):'',
+          mediaType:result.videoFile?'视频':'图片',
           comments:result.topComments.length,
           commentTexts:result.topComments.slice(0,3).map(c=>c.text),
           topComments:result.topComments.slice(0,3),
           outputDir:`/output/_media/${handle}_${tweetId}/`,
-          zipUrl:`/api/zip/_media/${handle}_${tweetId}`
+          zipUrl:`/api/zip/_media/${handle}_${tweetId}`,
+          postUrl:`https://x.com/${handle}/status/${tweetId}`
         }));
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
     });return;
