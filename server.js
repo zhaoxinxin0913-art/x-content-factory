@@ -317,7 +317,7 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <h2 data-i18n="lblUrl">🔗 X 博主链接</h2>
   <input class="inp" id="url" data-ph="phUrl" placeholder="https://x.com/博主用户名">
   <h2 style="margin-top:14px" data-i18n="lblToken">🔐 Auth Token</h2>
-  <p class="dsc" data-i18n="lblTokenDesc">从 Chrome DevTools 复制</p>
+  <p class="dsc" data-i18n="lblTokenDesc">不知道 token 是什么？→ <a href="/get-token" target="_blank" style="color:#1d9bf0;font-weight:700">点这里获取</a></p>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <input class="inp" id="token" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
     <button class="btn" style="width:auto;padding:12px 14px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制')">🔐 获取Token</button>
@@ -565,6 +565,7 @@ const server=http.createServer(async(req,res)=>{
   res.setHeader('Access-Control-Allow-Headers','Content-Type');
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return}
   if(u.pathname==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(INDEX);return}
+  if(u.pathname==='/get-token'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'get-token.html')));return}
   if(u.pathname==='/api/run'&&req.method==='POST'){
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
       try{
