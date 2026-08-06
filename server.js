@@ -1,6 +1,14 @@
 const http=require('http'),fs=require('fs'),path=require('path'),puppeteer=require('puppeteer');
-const PORT=process.env.PORT||5050,OUTPUT=path.join(__dirname,'output');
-fs.existsSync(OUTPUT)||fs.mkdirSync(OUTPUT,{recursive:true});
+// 加载环境变量
+if(fs.existsSync(path.join(__dirname,'.env'))){
+  fs.readFileSync(path.join(__dirname,'.env'),'utf8').split('\n').forEach(line=>{
+    const [key,val]=line.trim().split('=');
+    if(key&&val)process.env[key]=val;
+  });
+}
+const PORT=5050,OUTPUT=path.join(__dirname,'output');
+fs.existsSync(OUTPUT)||fs.mkdirSync(OUTPUT);
+const{uploadToFeishu}=require('./feishu.js');
 
 // ============================================================
 const STYLES=[{cls:'s1',css:'background:#fafafa',txt:'color:#333'},
@@ -726,8 +734,7 @@ const server=http.createServer(async(req,res)=>{
         if(category==='MEME')cnTags.push('#搞笑');
         if(category==='Food')cnTags.push('#美食');
         
-        res.writeHead(200,{'Content-Type':'application/json'});
-        res.end(JSON.stringify({
+        const responseData={
           handle,tweetId,
           text:result.post.text,
           cnText,
@@ -743,10 +750,19 @@ const server=http.createServer(async(req,res)=>{
           comments:result.topComments.length,
           commentTexts:result.topComments.slice(0,3).map(c=>c.text),
           topComments:result.topComments.slice(0,3),
-          outputDir:`/output/_media/${handle}_${tweetId}/`,
+          outputDir:path.join(OUTPUT,'_media',`${handle}_${tweetId}`),
           zipUrl:`/api/zip/_media/${handle}_${tweetId}`,
           postUrl:`https://x.com/${handle}/status/${tweetId}`
-        }));
+        };
+        
+        // 异步上传到飞书（不阻塞响应）
+        uploadToFeishu(responseData).then(r=>{
+          if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
+          else console.error('⚠️  飞书同步失败:',r.error);
+        }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
+        
+        res.writeHead(200,{'Content-Type':'application/json'});
+        res.end(JSON.stringify(responseData));
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
     });return;
   }
