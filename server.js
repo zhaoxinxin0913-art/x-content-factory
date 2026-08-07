@@ -640,9 +640,14 @@ async function downloadMedia(postUrl,token,jobDir){
     try{
       const{execSync}=require('child_process');
       const cookieFile=path.join(jobDir,'.cookies.txt');
-      fs.writeFileSync(cookieFile,`# Netscape HTTP Cookie File\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}\n`);
+      // 生成 ct0 (csrf token) - 用前16位 auth_token
+      const ct0 = token.substring(0, 16) + 'a'.repeat(16);
+      fs.writeFileSync(cookieFile,`# Netscape HTTP Cookie File
+.x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}
+.x.com\tTRUE\t/\tTRUE\t0\tct0\t${ct0}
+`);
       const output = execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}"`,{timeout:120000,encoding:'utf8'});
-      console.log('yt-dlp输出:', output);
+      console.log('yt-dlp输出:', output.substring(0, 200));
       if(fs.existsSync(path.join(mediaDir,'video.mp4'))){
         videoFile='media/video.mp4';
         console.log('✅ 视频下载成功');
