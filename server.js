@@ -738,9 +738,9 @@ const server=http.createServer(async(req,res)=>{
           origTags:origTags.slice(0,5).join(' ')||'#'+category,
           cn:result.post.text?'':'',
           images:result.downloadedImgs.length,
-          imagePaths:result.downloadedImgs.map(f=>path.basename(f)),
+          imagePaths:result.downloadedImgs, // 保留完整路径(含media/)
           video:!!result.videoFile,
-          videoPath:result.videoFile?path.basename(result.videoFile):'',
+          videoPath:result.videoFile||'', // 保留完整路径(含media/)
           mediaType:result.videoFile?'视频':'图片',
           outputDir:path.join(OUTPUT,'_media',`${handle}_${tweetId}`),
           zipUrl:`/api/zip/_media/${handle}_${tweetId}`,
