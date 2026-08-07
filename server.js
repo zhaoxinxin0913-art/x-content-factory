@@ -635,7 +635,7 @@ async function downloadMedia(postUrl,token,jobDir){
     try{
       const{execSync}=require('child_process');
       execSync(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000});
-      downloadedImgs.push(fname);
+      downloadedImgs.push('media/'+fname);
     }catch(e){/* skip */}
   }
 
@@ -647,7 +647,7 @@ async function downloadMedia(postUrl,token,jobDir){
       const cookieFile=path.join(jobDir,'.cookies.txt');
       fs.writeFileSync(cookieFile,`# Netscape HTTP Cookie File\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}\n`);
       execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}" 2>/dev/null`,{timeout:120000});
-      if(fs.existsSync(path.join(mediaDir,'video.mp4')))videoFile='video.mp4';
+      if(fs.existsSync(path.join(mediaDir,'video.mp4')))videoFile='media/video.mp4';
       try{fs.unlinkSync(cookieFile)}catch(e){}
     }catch(e){/* video download failed, continue */}
   }
