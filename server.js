@@ -460,7 +460,10 @@ async function runMedia(){
     if(d.error){MA(d.error,'err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
     MA('完成: '+d.images+' 张图'+(d.video?' + 视频':'')+' + '+d.comments+' 条优质评论','ok');
     let html='<h3>✅ 搬运完成</h3>';
-    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>原文：</strong><br>'+d.text.substring(0,300)+(d.text.length>300?'…':'')+'</div>';
+    if(d.cnText && d.cnText !== d.text){
+      html+='<div style="background:#e8f5e9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>🇨🇳 中文翻译：</strong><br>'+d.cnText.substring(0,300)+(d.cnText.length>300?'…':'')+'</div>';
+    }
+    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>📝 原文：</strong><br>'+d.text.substring(0,300)+(d.text.length>300?'…':'')+'</div>';
     
     // 图片预览
     if(d.images>0&&d.imagePaths){
