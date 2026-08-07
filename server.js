@@ -458,7 +458,7 @@ async function runMedia(){
     let d;
     try{d=await r.json()}catch(e){MA('服务器返回异常','err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
     if(d.error){MA(d.error,'err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
-    MA('完成: '+d.images+' 张图'+(d.video?' + 视频':'')+' + '+d.comments+' 条优质评论','ok');
+    MA('完成: '+d.images+' 张图'+(d.video?' + 视频':''),'ok');
     let html='<h3>✅ 搬运完成</h3>';
     if(d.cnText && d.cnText !== d.text){
       html+='<div style="background:#e8f5e9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>🇨🇳 中文翻译：</strong><br>'+d.cnText.substring(0,300)+(d.cnText.length>300?'…':'')+'</div>';
@@ -489,12 +489,6 @@ async function runMedia(){
       html+='<video src="'+vurl+'" controls style="width:100%;display:block"></video>';
       html+='<button onclick="downloadFile(&quot;'+vurl+'&quot;,1,&quot;'+ext+'&quot;)" style="position:absolute;bottom:12px;right:12px;padding:6px 14px;background:rgba(0,0,0,0.8);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700">⬇️ 下载视频</button>';
       html+='</div>';
-    }
-    
-    // 评论
-    if(d.commentTexts&&d.commentTexts.length){
-      html+='<h4 style="margin:16px 0 8px 0;font-size:15px">💬 优质评论 ('+d.comments+')</h4>';
-      html+='<div style="background:#f0f7ff;border-radius:6px;padding:10px;font-size:12px;color:#666;line-height:1.8">'+d.commentTexts.map((c,i)=>(i+1)+'. '+c).join('<br>')+'</div>';
     }
     
     // 表格记录
@@ -623,7 +617,7 @@ async function scrapePost(postUrl,token){
 
 async function downloadMedia(postUrl,token,jobDir){
   const mediaDir=path.join(jobDir,'media');fs.existsSync(mediaDir)||fs.mkdirSync(mediaDir,{recursive:true});
-  const{post,comments}=await scrapePost(postUrl,token);
+  const{post}=await scrapePost(postUrl,token); // 不再抓取评论
   if(!post)throw new Error('无法读取帖子内容');
 
   // 下载图片
@@ -652,10 +646,7 @@ async function downloadMedia(postUrl,token,jobDir){
     }catch(e){/* video download failed, continue */}
   }
 
-  // 筛选优质评论（top 10 by likes）
-  const topComments=comments.slice(0,10);
-
-  return{post,topComments,downloadedImgs,videoFile};
+  return{post,downloadedImgs,videoFile};
 }
 
 // ============================================================
@@ -751,9 +742,6 @@ const server=http.createServer(async(req,res)=>{
           video:!!result.videoFile,
           videoPath:result.videoFile?path.basename(result.videoFile):'',
           mediaType:result.videoFile?'视频':'图片',
-          comments:result.topComments.length,
-          commentTexts:result.topComments.slice(0,3).map(c=>c.text),
-          topComments:result.topComments.slice(0,3),
           outputDir:path.join(OUTPUT,'_media',`${handle}_${tweetId}`),
           zipUrl:`/api/zip/_media/${handle}_${tweetId}`,
           postUrl:`https://x.com/${handle}/status/${tweetId}`
