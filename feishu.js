@@ -6,7 +6,7 @@ const path = require('path');
 const APP_ID = process.env.FEISHU_APP_ID || 'cli_aa87e573e0b99bc9';
 const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
 const BASE_ID = 'Cc9EwQoQIiLxw1kUzoOcg6DHnUd';
-const TABLE_ID = 'tbl2YnuB3tpBZP0o';
+const TABLE_ID = 'tblqDU6VsOPrYvPm'; // 内容工厂联通
 
 // 字段映射
 const FIELDS = {
@@ -142,9 +142,10 @@ async function addRecord(token, data) {
   // 构建记录
   const fields = {
     [FIELDS.content]: data.content || '',
-    [FIELDS.type]: data.type || 'General',
     [FIELDS.tags]: data.tags || ''
   };
+
+  // 注意：帖子类型(单选)暂时不填，避免选项不匹配
 
   if (fileTokens.length > 0) {
     fields[FIELDS.attachments] = fileTokens;

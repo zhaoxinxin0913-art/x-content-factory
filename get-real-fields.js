@@ -1,0 +1,79 @@
+const https = require('https');
+const fs = require('fs');
+
+if(fs.existsSync('.env')){
+  fs.readFileSync('.env','utf8').split('\n').forEach(line=>{
+    const [key,val]=line.trim().split('=');
+    if(key&&val)process.env[key]=val;
+  });
+}
+
+const APP_ID = process.env.FEISHU_APP_ID;
+const APP_SECRET = process.env.FEISHU_APP_SECRET;
+const BASE_ID = 'Cc9EwQoQIiLxw1kUzoOcg6DHnUd';
+const TABLE_ID = 'tblqDU6VsOPrYvPm'; // 内容工厂联通
+
+function getTenantToken() {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({ app_id: APP_ID, app_secret: APP_SECRET });
+    const options = {
+      hostname: 'open.feishu.cn',
+      path: '/open-apis/auth/v3/tenant_access_token/internal',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    };
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        const result = JSON.parse(body);
+        if (result.code === 0) resolve(result.tenant_access_token);
+        else reject(new Error(result.msg));
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+async function getTableFields(token) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'open.feishu.cn',
+      path: `/open-apis/bitable/v1/apps/${BASE_ID}/tables/${TABLE_ID}/fields`,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` }
+    };
+    
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        const result = JSON.parse(body);
+        if (result.code === 0) {
+          console.log('✅ "内容工厂联通"表字段：\n');
+          result.data.items.forEach(field => {
+            console.log(`字段名: ${field.field_name}`);
+            console.log(`字段ID: ${field.field_id}`);
+            console.log(`类型: ${field.type}`);
+            console.log('---');
+          });
+        } else {
+          console.error('❌ 获取失败:', result.msg);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+(async () => {
+  try {
+    const token = await getTenantToken();
+    await getTableFields(token);
+  } catch (e) {
+    console.error('错误:', e.message);
+  }
+})();

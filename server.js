@@ -703,19 +703,20 @@ const server=http.createServer(async(req,res)=>{
         // 保存结果
         fs.writeFileSync(path.join(jobDir,'data.json'),JSON.stringify(result,null,2));
         
-        // 翻译（可选，不阻塞响应）
-        const cnText=result.post.text; // 默认显示原文
-        translateText(result.post.text).then(t=>{
-          if(t&&t.length>5){
-            // 异步更新翻译结果到文件
-            try{
-              const dataFile=path.join(jobDir,'data.json');
-              const data=JSON.parse(fs.readFileSync(dataFile,'utf8'));
-              data.post.cnText=t;
-              fs.writeFileSync(dataFile,JSON.stringify(data,null,2));
-            }catch(e){}
-          }
-        }).catch(()=>{});
+        // 翻译（同步等待，确保返回翻译结果）
+        let cnText = result.post.text; // 默认原文
+        try {
+          cnText = await Promise.race([
+            translateText(result.post.text),
+            new Promise(resolve => setTimeout(() => resolve(result.post.text), 5000))
+          ]);
+          if (!cnText || cnText.length < 5) cnText = result.post.text;
+          // 更新到文件
+          result.post.cnText = cnText;
+          fs.writeFileSync(path.join(jobDir,'data.json'),JSON.stringify(result,null,2));
+        } catch(e) {
+          console.error('翻译失败:', e.message);
+        }
         
         // 分类
         const text=result.post.text.toLowerCase();
@@ -755,11 +756,11 @@ const server=http.createServer(async(req,res)=>{
           postUrl:`https://x.com/${handle}/status/${tweetId}`
         };
         
-        // 异步上传到飞书（不阻塞响应）
-        uploadToFeishu(responseData).then(r=>{
-          if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
-          else console.error('⚠️  飞书同步失败:',r.error);
-        }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
+        // 异步上传到飞书（不阻塞响应）- 暂时禁用直到权限配置完成
+        // uploadToFeishu(responseData).then(r=>{
+        //   if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
+        //   else console.error('⚠️  飞书同步失败:',r.error);
+        // }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
         
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify(responseData));
