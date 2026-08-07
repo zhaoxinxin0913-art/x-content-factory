@@ -461,9 +461,9 @@ async function runMedia(){
     MA('完成: '+d.images+' 张图'+(d.video?' + 视频':''),'ok');
     let html='<h3>✅ 搬运完成</h3>';
     if(d.cnText && d.cnText !== d.text){
-      html+='<div style="background:#e8f5e9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>🇨🇳 中文翻译：</strong><br>'+d.cnText.substring(0,300)+(d.cnText.length>300?'…':'')+'</div>';
+      html+='<div style="background:#e8f5e9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6;max-height:400px;overflow-y:auto"><strong>🇨🇳 中文翻译：</strong><br>'+d.cnText+'</div>';
     }
-    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6"><strong>📝 原文：</strong><br>'+d.text.substring(0,300)+(d.text.length>300?'…':'')+'</div>';
+    html+='<div style="background:#f9f9f9;border-radius:8px;padding:12px;margin:10px 0;font-size:13px;line-height:1.6;max-height:400px;overflow-y:auto"><strong>📝 原文：</strong><br>'+d.text+'</div>';
     
     // 图片预览
     if(d.images>0&&d.imagePaths){
@@ -636,14 +636,25 @@ async function downloadMedia(postUrl,token,jobDir){
   // 下载视频（用 yt-dlp）
   let videoFile=null;
   if(post.hasVideo){
+    console.log('🎬 检测到视频，开始下载...');
     try{
       const{execSync}=require('child_process');
       const cookieFile=path.join(jobDir,'.cookies.txt');
       fs.writeFileSync(cookieFile,`# Netscape HTTP Cookie File\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}\n`);
-      execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}" 2>/dev/null`,{timeout:120000});
-      if(fs.existsSync(path.join(mediaDir,'video.mp4')))videoFile='media/video.mp4';
+      const output = execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}"`,{timeout:120000,encoding:'utf8'});
+      console.log('yt-dlp输出:', output);
+      if(fs.existsSync(path.join(mediaDir,'video.mp4'))){
+        videoFile='media/video.mp4';
+        console.log('✅ 视频下载成功');
+      } else {
+        console.log('⚠️  视频文件不存在');
+      }
       try{fs.unlinkSync(cookieFile)}catch(e){}
-    }catch(e){/* video download failed, continue */}
+    }catch(e){
+      console.error('❌ 视频下载失败:', e.message);
+    }
+  } else {
+    console.log('ℹ️  未检测到视频');
   }
 
   return{post,downloadedImgs,videoFile};
