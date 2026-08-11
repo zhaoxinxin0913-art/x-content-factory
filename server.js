@@ -457,6 +457,7 @@ async function runMedia(){
     const r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,token:t})});
     let d;
     try{d=await r.json()}catch(e){MA('服务器返回异常','err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
+    console.log('📦 后端返回数据:', d); // 调试日志
     if(d.error){MA(d.error,'err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
     MA('完成: '+d.images+' 张图'+(d.video?' + 视频':''),'ok');
     let html='<h3>✅ 搬运完成</h3>';
@@ -557,51 +558,54 @@ function copyTableToClipboard(){
 // ============================================================
 async function scrapePost(postUrl,token){
   const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
-  const p=await b.newPage();await p.setViewport({width:1280,height:900});
-  await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000}); // 15秒→30秒
-  await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-  await new Promise(r=>setTimeout(r,500));
-  await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
-  
-  // 等待主推文加载（优化：1次重试）
-  let tweetFound=false;
-  for(let i=0;i<2;i++){ // 3次→2次
-    try{
-      await p.waitForSelector('[data-testid="tweet"]',{timeout:8000}); // 10秒→8秒
-      tweetFound=true;
-      break;
-    }catch(e){
-      if(i<1){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});} // 3秒→2秒
+  try {
+    const p=await b.newPage();await p.setViewport({width:1280,height:900});
+    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
+    await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
+    await new Promise(r=>setTimeout(r,500));
+    await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
+    
+    // 等待主推文加载（优化：1次重试）
+    let tweetFound=false;
+    for(let i=0;i<2;i++){
+      try{
+        await p.waitForSelector('[data-testid="tweet"]',{timeout:8000});
+        tweetFound=true;
+        break;
+      }catch(e){
+        if(i<1){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});}
+      }
     }
-  }
-  if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
-  await new Promise(r=>setTimeout(r,1000)); // 2秒→1秒
+    if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
+    await new Promise(r=>setTimeout(r,1000));
 
-  // 提取主帖内容
-  const post=await p.evaluate(()=>{
-    const tweet=document.querySelector('article[data-testid="tweet"]');
-    if(!tweet)return null;
-    const text=tweet.querySelector('[data-testid="tweetText"]')?.innerText||'';
-    const time=tweet.querySelector('time')?.getAttribute('datetime')||'';
-    const aria=tweet.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
-    // 图片
-    const imgs=[...tweet.querySelectorAll('img[src*="pbs.twimg.com/media"]')].map(i=>{
-      let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
-      return src;
+    // 提取主帖内容
+    const post=await p.evaluate(()=>{
+      const tweet=document.querySelector('article[data-testid="tweet"]');
+      if(!tweet)return null;
+      const text=tweet.querySelector('[data-testid="tweetText"]')?.innerText||'';
+      const time=tweet.querySelector('time')?.getAttribute('datetime')||'';
+      const aria=tweet.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
+      // 图片
+      const imgs=[...tweet.querySelectorAll('img[src*="pbs.twimg.com/media"]')].map(i=>{
+        let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
+        return src;
+      });
+      // 视频检测（多种选择器）
+      const hasVideo = !!tweet.querySelector('video') || 
+                       !!tweet.querySelector('[data-testid="videoPlayer"]') ||
+                       !!tweet.querySelector('[data-testid="videoComponent"]') ||
+                       !!tweet.querySelector('[aria-label*="video"]') ||
+                       !!tweet.querySelector('div[data-testid="card.layoutLarge.media"]');
+      // 用户信息
+      const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
+      return{text,time,aria,imgs,hasVideo,handle};
     });
-    // 视频检测（多种选择器）
-    const hasVideo = !!tweet.querySelector('video') || 
-                     !!tweet.querySelector('[data-testid="videoPlayer"]') ||
-                     !!tweet.querySelector('[data-testid="videoComponent"]') ||
-                     !!tweet.querySelector('[aria-label*="video"]') ||
-                     !!tweet.querySelector('div[data-testid="card.layoutLarge.media"]');
-    // 用户信息
-    const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
-    return{text,time,aria,imgs,hasVideo,handle};
-  });
 
-  await b.close();
-  return{post,comments:[]};
+    return{post,comments:[]};
+  } finally {
+    await b.close(); // 确保浏览器一定关闭
+  }
 }
 
 async function downloadMedia(postUrl,token,jobDir){
@@ -756,13 +760,15 @@ const server=http.createServer(async(req,res)=>{
         };
         
         // 异步上传到飞书（不阻塞响应）
-        uploadToFeishu({
+        const feishuData = {
           content: result.post.text,  // 原文
           tags: origTags.join(' '),   // 原文标签
           images: result.downloadedImgs.length,
           mediaType: result.videoFile ? '视频' : '图片',
           files: result.downloadedImgs.map(f => path.join(jobDir, f)).concat(result.videoFile ? [path.join(jobDir, result.videoFile)] : [])
-        }).then(r=>{
+        };
+        console.log('📊 飞书数据:', JSON.stringify({content: feishuData.content?.substring(0,50), tags: feishuData.tags, images: feishuData.images, mediaType: feishuData.mediaType, filesCount: feishuData.files.length}));
+        uploadToFeishu(feishuData).then(r=>{
           if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
           else console.error('⚠️  飞书同步失败:',r.error);
         }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
