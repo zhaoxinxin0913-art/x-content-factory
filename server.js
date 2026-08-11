@@ -578,9 +578,17 @@ async function scrapePost(postUrl,token){
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
     await new Promise(r=>setTimeout(r,2000));
     
-    // 滚动一下让视频元素加载
+    // 滚动并等待视频元素加载（尝试多种方式）
     await p.evaluate(()=>window.scrollBy(0,300));
     await new Promise(r=>setTimeout(r,1000));
+    
+    // 尝试直接等待视频元素出现（最多5秒）
+    try {
+      await p.waitForSelector('video', {timeout: 5000});
+      console.log('✅ 视频元素已加载');
+    } catch(e) {
+      console.log('⚠️  5秒内未检测到video元素，继续检查其他选择器...');
+    }
 
     // 提取主帖内容
     const post=await p.evaluate(()=>{
@@ -594,11 +602,28 @@ async function scrapePost(postUrl,token){
         let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
         return src;
       });
-      // 视频检测
-      const hasVideo=!!tweet.querySelector('video')||!!tweet.querySelector('[data-testid="videoPlayer"]');
+      // 视频检测（多种方式）
+      const videoInTweet = !!tweet.querySelector('video');
+      const videoPlayerTestId = !!tweet.querySelector('[data-testid="videoPlayer"]');
+      const videoGlobal = !!document.querySelector('video');
+      const videoTestIdPartial = !!tweet.querySelector('div[data-testid*="video"]');
+      const videoAriaLabel = !!tweet.querySelector('[aria-label*="video" i]') || !!tweet.querySelector('[aria-label*="Video" i]');
+      
+      const hasVideo = videoInTweet || videoPlayerTestId || videoGlobal || videoTestIdPartial || videoAriaLabel;
+      
+      // 调试信息
+      const videoDebug = {
+        videoInTweet,
+        videoPlayerTestId,
+        videoGlobal,
+        videoTestIdPartial,
+        videoAriaLabel,
+        hasVideo,
+        allTestIds: [...document.querySelectorAll('[data-testid]')].map(el => el.getAttribute('data-testid')).filter(id => id && id.toLowerCase().includes('video')).slice(0, 5)
+      };
       // 用户信息
       const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
-      return{text,time,aria,imgs,hasVideo,handle};
+      return{text,time,aria,imgs,hasVideo,handle,videoDebug};
     });
 
     // 抓取评论（前20条热门）
@@ -627,8 +652,11 @@ async function downloadMedia(postUrl,token,jobDir){
   const{post}=await scrapePost(postUrl,token); // 不再抓取评论
   if(!post)throw new Error('无法读取帖子内容');
   
-  // 调试：输出 post 对象
+  // 调试：输出 post 对象和视频检测详情
   console.log('📋 Post对象:', JSON.stringify({hasVideo: post.hasVideo, imgsCount: post.imgs.length, textLength: post.text?.length}));
+  if(post.videoDebug) {
+    console.log('🔍 视频检测详情:', JSON.stringify(post.videoDebug));
+  }
 
   // 下载图片
   const downloadedImgs=[];
