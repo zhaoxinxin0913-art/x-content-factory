@@ -751,11 +751,17 @@ const server=http.createServer(async(req,res)=>{
           postUrl:`https://x.com/${handle}/status/${tweetId}`
         };
         
-        // 异步上传到飞书（不阻塞响应）- 暂时禁用直到权限配置完成
-        // uploadToFeishu(responseData).then(r=>{
-        //   if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
-        //   else console.error('⚠️  飞书同步失败:',r.error);
-        // }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
+        // 异步上传到飞书（不阻塞响应）
+        uploadToFeishu({
+          content: result.post.text,  // 原文
+          tags: origTags.join(' '),   // 原文标签
+          images: result.downloadedImgs.length,
+          mediaType: result.videoFile ? '视频' : '图片',
+          files: result.downloadedImgs.map(f => path.join(jobDir, f)).concat(result.videoFile ? [path.join(jobDir, result.videoFile)] : [])
+        }).then(r=>{
+          if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
+          else console.error('⚠️  飞书同步失败:',r.error);
+        }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
         
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify(responseData));

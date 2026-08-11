@@ -6,14 +6,25 @@ const path = require('path');
 const APP_ID = process.env.FEISHU_APP_ID || 'cli_aa87e573e0b99bc9';
 const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
 const BASE_ID = 'Cc9EwQoQIiLxw1kUzoOcg6DHnUd';
-const TABLE_ID = 'tblqDU6VsOPrYvPm'; // 内容工厂联通
+const TABLE_ID = 'tblRbwUBibElOq3J'; // 新表格ID
 
 // 字段映射
 const FIELDS = {
-  content: 'fldZfXeC45',      // 帖子内容
-  type: 'fldRKyXFT6',         // 帖子类型
-  tags: 'fldUJirSPl',         // Tag名称
-  attachments: 'fldvxFc4sV'   // 附件
+  content: 'fldZfXeC45',       // 帖子内容（原文）
+  type: 'fldRKyXFT6',          // 帖子类型（图片/视频/文字）
+  tags: 'fldUJirSPl',          // Tag名称（原文标签）
+  anonymous: 'fldCWJOWAC',     // 是否匿名
+  region: 'fldchoPbq0',        // 帖子区域（TH/PH）
+  randomAccount: 'fldUYDtZYe', // 随机账号
+  attachments: 'fldvxFc4sV'    // 附件
+};
+
+// 选项ID映射
+const OPTIONS = {
+  type: {text: 'optxtfhyzT', image: 'optcgykl3n', video: 'opt9Ecyx4z'},
+  anonymous: {yes: 'opt8SySfqy', no: 'optx8h0BM8'},
+  region: {TH: 'optiSGf6In', PH: 'optjbZMlCE', OTHERS: 'opt3I3SuJ4'},
+  randomAccount: {yes: 'optFm5kS9h', no: 'optQLTpKfi'}
 };
 
 // 获取 tenant_access_token
@@ -141,11 +152,30 @@ async function addRecord(token, data) {
 
   // 构建记录
   const fields = {
-    [FIELDS.content]: data.content || '',
-    [FIELDS.tags]: data.tags || ''
+    [FIELDS.content]: data.content || '',  // 原文
+    [FIELDS.tags]: data.tags || '',        // 原文标签
+    [FIELDS.anonymous]: OPTIONS.anonymous.no,     // 是否匿名：否
+    [FIELDS.randomAccount]: OPTIONS.randomAccount.no  // 随机账号：否
   };
 
-  // 注意：帖子类型(单选)暂时不填，避免选项不匹配
+  // 帖子类型（单选）
+  if (data.mediaType === '视频') {
+    fields[FIELDS.type] = OPTIONS.type.video;
+  } else if (data.images > 0) {
+    fields[FIELDS.type] = OPTIONS.type.image;
+  } else {
+    fields[FIELDS.type] = OPTIONS.type.text;
+  }
+
+  // 帖子区域（根据原文语言自动识别）
+  const text = data.content || '';
+  if (/[\u0E00-\u0E7F]/.test(text)) {
+    fields[FIELDS.region] = OPTIONS.region.TH; // 泰文
+  } else if (/[ก-๙]/.test(text) || text.includes('ng') || text.includes('mga')) {
+    fields[FIELDS.region] = OPTIONS.region.PH; // 菲律宾语（简单检测）
+  } else {
+    fields[FIELDS.region] = OPTIONS.region.OTHERS;
+  }
 
   if (fileTokens.length > 0) {
     fields[FIELDS.attachments] = fileTokens;
