@@ -577,6 +577,10 @@ async function scrapePost(postUrl,token){
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
     await new Promise(r=>setTimeout(r,2000));
+    
+    // 滚动一下让视频元素加载
+    await p.evaluate(()=>window.scrollBy(0,300));
+    await new Promise(r=>setTimeout(r,1000));
 
     // 提取主帖内容
     const post=await p.evaluate(()=>{
@@ -622,6 +626,9 @@ async function downloadMedia(postUrl,token,jobDir){
   const mediaDir=path.join(jobDir,'media');fs.existsSync(mediaDir)||fs.mkdirSync(mediaDir,{recursive:true});
   const{post}=await scrapePost(postUrl,token); // 不再抓取评论
   if(!post)throw new Error('无法读取帖子内容');
+  
+  // 调试：输出 post 对象
+  console.log('📋 Post对象:', JSON.stringify({hasVideo: post.hasVideo, imgsCount: post.imgs.length, textLength: post.text?.length}));
 
   // 下载图片
   const downloadedImgs=[];
