@@ -457,7 +457,6 @@ async function runMedia(){
     const r=await fetch('/api/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,token:t})});
     let d;
     try{d=await r.json()}catch(e){MA('服务器返回异常','err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
-    console.log('📦 后端返回数据:', d); // 调试日志
     if(d.error){MA(d.error,'err');MB.disabled=false;MB.textContent='🎬 开始搬运';return}
     MA('完成: '+d.images+' 张图'+(d.video?' + 视频':''),'ok');
     let html='<h3>✅ 搬运完成</h3>';
@@ -560,24 +559,24 @@ async function scrapePost(postUrl,token){
   const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
   try {
     const p=await b.newPage();await p.setViewport({width:1280,height:900});
-    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
+    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
     await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-    await new Promise(r=>setTimeout(r,500));
+    await new Promise(r=>setTimeout(r,1000));
     await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
     
-    // 等待主推文加载（优化：1次重试）
+    // 等待主推文加载（增加重试）
     let tweetFound=false;
-    for(let i=0;i<2;i++){
+    for(let i=0;i<3;i++){
       try{
-        await p.waitForSelector('[data-testid="tweet"]',{timeout:8000});
+        await p.waitForSelector('[data-testid="tweet"]',{timeout:10000});
         tweetFound=true;
         break;
       }catch(e){
-        if(i<1){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});}
+        if(i<2){await new Promise(r=>setTimeout(r,3000));await p.reload({waitUntil:'domcontentloaded'});}
       }
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
-    await new Promise(r=>setTimeout(r,1000));
+    await new Promise(r=>setTimeout(r,2000));
 
     // 提取主帖内容
     const post=await p.evaluate(()=>{
@@ -591,18 +590,29 @@ async function scrapePost(postUrl,token){
         let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
         return src;
       });
-      // 视频检测（多种选择器）
-      const hasVideo = !!tweet.querySelector('video') || 
-                       !!tweet.querySelector('[data-testid="videoPlayer"]') ||
-                       !!tweet.querySelector('[data-testid="videoComponent"]') ||
-                       !!tweet.querySelector('[aria-label*="video"]') ||
-                       !!tweet.querySelector('div[data-testid="card.layoutLarge.media"]');
+      // 视频检测
+      const hasVideo=!!tweet.querySelector('video')||!!tweet.querySelector('[data-testid="videoPlayer"]');
       // 用户信息
       const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
       return{text,time,aria,imgs,hasVideo,handle};
     });
 
-    return{post,comments:[]};
+    // 抓取评论（前20条热门）
+    await p.evaluate(()=>window.scrollBy(0,1500));
+    await new Promise(r=>setTimeout(r,2000));
+    const comments=await p.evaluate(()=>{
+      const tweets=[...document.querySelectorAll('article[data-testid="tweet"]')];
+      return tweets.slice(1,21).map(t=>{
+        const text=t.querySelector('[data-testid="tweetText"]')?.innerText||'';
+        const aria=t.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
+        const links=t.querySelectorAll('a[role="link"][href^="/"]');
+        let handle='';links.forEach(l=>{const h=l.getAttribute('href');if(h&&!h.includes('/status/')&&h.startsWith('/'))handle=h.replace('/','');});
+        const likes=parseInt(((aria.match(/(\\d[\\d,]*)\\s*like/)||['','0'])[1]).replace(/,/g,''))||0;
+        return{handle,text:text.substring(0,300),likes};
+      }).filter(c=>c.text.length>5).sort((a,b)=>b.likes-a.likes);
+    });
+
+    return{post,comments};
   } finally {
     await b.close(); // 确保浏览器一定关闭
   }
@@ -610,24 +620,21 @@ async function scrapePost(postUrl,token){
 
 async function downloadMedia(postUrl,token,jobDir){
   const mediaDir=path.join(jobDir,'media');fs.existsSync(mediaDir)||fs.mkdirSync(mediaDir,{recursive:true});
-  const{post}=await scrapePost(postUrl,token);
+  const{post}=await scrapePost(postUrl,token); // 不再抓取评论
   if(!post)throw new Error('无法读取帖子内容');
 
-  // 下载图片（并行）
+  // 下载图片
   const downloadedImgs=[];
-  const downloadPromises = post.imgs.map(async (imgUrl, i) => {
+  for(let i=0;i<post.imgs.length;i++){
+    const imgUrl=post.imgs[i];
     const ext=imgUrl.includes('format=png')?'png':'jpg';
     const fname=`img_${String(i+1).padStart(2,'0')}.${ext}`;
     try{
       const{execSync}=require('child_process');
       execSync(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000});
-      return 'media/'+fname;
-    }catch(e){
-      return null;
-    }
-  });
-  const results = await Promise.all(downloadPromises);
-  downloadedImgs.push(...results.filter(f => f !== null));
+      downloadedImgs.push('media/'+fname);
+    }catch(e){/* skip */}
+  }
 
   // 下载视频（用 yt-dlp）
   let videoFile=null;
@@ -759,19 +766,11 @@ const server=http.createServer(async(req,res)=>{
           postUrl:`https://x.com/${handle}/status/${tweetId}`
         };
         
-        // 异步上传到飞书（不阻塞响应）
-        const feishuData = {
-          content: result.post.text,  // 原文
-          tags: origTags.join(' '),   // 原文标签
-          images: result.downloadedImgs.length,
-          mediaType: result.videoFile ? '视频' : '图片',
-          files: result.downloadedImgs.map(f => path.join(jobDir, f)).concat(result.videoFile ? [path.join(jobDir, result.videoFile)] : [])
-        };
-        console.log('📊 飞书数据:', JSON.stringify({content: feishuData.content?.substring(0,50), tags: feishuData.tags, images: feishuData.images, mediaType: feishuData.mediaType, filesCount: feishuData.files.length}));
-        uploadToFeishu(feishuData).then(r=>{
-          if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
-          else console.error('⚠️  飞书同步失败:',r.error);
-        }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
+        // 异步上传到飞书（不阻塞响应）- 暂时禁用直到权限配置完成
+        // uploadToFeishu(responseData).then(r=>{
+        //   if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
+        //   else console.error('⚠️  飞书同步失败:',r.error);
+        // }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
         
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify(responseData));

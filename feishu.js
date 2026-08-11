@@ -157,6 +157,13 @@ async function addRecord(token, data) {
     '是否匿名': '否',
     '随机账号': '否'
   };
+  
+  console.log('📝 准备写入字段:', JSON.stringify({
+    帖子内容长度: fields['帖子内容'].length,
+    Tag名称: fields['Tag名称'],
+    原始content: data.content?.substring(0,30),
+    原始tags: data.tags
+  }));
 
   // 帖子类型（单选，用中文名称）
   if (data.mediaType === '视频') {
