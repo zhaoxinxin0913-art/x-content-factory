@@ -560,22 +560,22 @@ async function scrapePost(postUrl,token){
   const p=await b.newPage();await p.setViewport({width:1280,height:900});
   await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
   await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-  await new Promise(r=>setTimeout(r,1000));
+  await new Promise(r=>setTimeout(r,500)); // 1秒→0.5秒
   await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
   
-  // 等待主推文加载（增加重试）
+  // 等待主推文加载（优化：1次重试）
   let tweetFound=false;
-  for(let i=0;i<3;i++){
+  for(let i=0;i<2;i++){ // 3次→2次
     try{
-      await p.waitForSelector('[data-testid="tweet"]',{timeout:10000});
+      await p.waitForSelector('[data-testid="tweet"]',{timeout:8000}); // 10秒→8秒
       tweetFound=true;
       break;
     }catch(e){
-      if(i<2){await new Promise(r=>setTimeout(r,3000));await p.reload({waitUntil:'domcontentloaded'});}
+      if(i<1){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});} // 3秒→2秒
     }
   }
   if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
-  await new Promise(r=>setTimeout(r,2000));
+  await new Promise(r=>setTimeout(r,1000)); // 2秒→1秒
 
   // 提取主帖内容
   const post=await p.evaluate(()=>{
@@ -596,42 +596,30 @@ async function scrapePost(postUrl,token){
     return{text,time,aria,imgs,hasVideo,handle};
   });
 
-  // 抓取评论（前20条热门）
-  await p.evaluate(()=>window.scrollBy(0,1500));
-  await new Promise(r=>setTimeout(r,2000));
-  const comments=await p.evaluate(()=>{
-    const tweets=[...document.querySelectorAll('article[data-testid="tweet"]')];
-    return tweets.slice(1,21).map(t=>{
-      const text=t.querySelector('[data-testid="tweetText"]')?.innerText||'';
-      const aria=t.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
-      const links=t.querySelectorAll('a[role="link"][href^="/"]');
-      let handle='';links.forEach(l=>{const h=l.getAttribute('href');if(h&&!h.includes('/status/')&&h.startsWith('/'))handle=h.replace('/','');});
-      const likes=parseInt(((aria.match(/(\d[\d,]*)\s*like/)||['','0'])[1]).replace(/,/g,''))||0;
-      return{handle,text:text.substring(0,300),likes};
-    }).filter(c=>c.text.length>5).sort((a,b)=>b.likes-a.likes);
-  });
-
   await b.close();
-  return{post,comments};
+  return{post,comments:[]};
 }
 
 async function downloadMedia(postUrl,token,jobDir){
   const mediaDir=path.join(jobDir,'media');fs.existsSync(mediaDir)||fs.mkdirSync(mediaDir,{recursive:true});
-  const{post}=await scrapePost(postUrl,token); // 不再抓取评论
+  const{post}=await scrapePost(postUrl,token);
   if(!post)throw new Error('无法读取帖子内容');
 
-  // 下载图片
+  // 下载图片（并行）
   const downloadedImgs=[];
-  for(let i=0;i<post.imgs.length;i++){
-    const imgUrl=post.imgs[i];
+  const downloadPromises = post.imgs.map(async (imgUrl, i) => {
     const ext=imgUrl.includes('format=png')?'png':'jpg';
     const fname=`img_${String(i+1).padStart(2,'0')}.${ext}`;
     try{
       const{execSync}=require('child_process');
       execSync(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000});
-      downloadedImgs.push('media/'+fname);
-    }catch(e){/* skip */}
-  }
+      return 'media/'+fname;
+    }catch(e){
+      return null;
+    }
+  });
+  const results = await Promise.all(downloadPromises);
+  downloadedImgs.push(...results.filter(f => f !== null));
 
   // 下载视频（用 yt-dlp）
   let videoFile=null;
