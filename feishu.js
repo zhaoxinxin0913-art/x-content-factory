@@ -150,35 +150,35 @@ async function addRecord(token, data) {
     }
   }
 
-  // 构建记录
+  // 构建记录（使用中文字段名）
   const fields = {
-    [FIELDS.content]: data.content || '',  // 原文
-    [FIELDS.tags]: data.tags || '',        // 原文标签
-    [FIELDS.anonymous]: OPTIONS.anonymous.no,     // 是否匿名：否
-    [FIELDS.randomAccount]: OPTIONS.randomAccount.no  // 随机账号：否
+    '帖子内容': data.content || '',  // 原文
+    'Tag名称': data.tags || '',        // 原文标签
+    '是否匿名': '否',
+    '随机账号': '否'
   };
 
-  // 帖子类型（单选）
+  // 帖子类型（单选，用中文名称）
   if (data.mediaType === '视频') {
-    fields[FIELDS.type] = OPTIONS.type.video;
+    fields['帖子类型'] = '视频';
   } else if (data.images > 0) {
-    fields[FIELDS.type] = OPTIONS.type.image;
+    fields['帖子类型'] = '图片';
   } else {
-    fields[FIELDS.type] = OPTIONS.type.text;
+    fields['帖子类型'] = '文字';
   }
 
   // 帖子区域（根据原文语言自动识别）
   const text = data.content || '';
   if (/[\u0E00-\u0E7F]/.test(text)) {
-    fields[FIELDS.region] = OPTIONS.region.TH; // 泰文
+    fields['帖子区域'] = 'TH'; // 泰文
   } else if (/[ก-๙]/.test(text) || text.includes('ng') || text.includes('mga')) {
-    fields[FIELDS.region] = OPTIONS.region.PH; // 菲律宾语（简单检测）
+    fields['帖子区域'] = 'PH'; // 菲律宾语
   } else {
-    fields[FIELDS.region] = OPTIONS.region.OTHERS;
+    fields['帖子区域'] = 'OTHERS';
   }
 
   if (fileTokens.length > 0) {
-    fields[FIELDS.attachments] = fileTokens;
+    fields['附件'] = fileTokens;
   }
 
   const record = JSON.stringify({ fields });
