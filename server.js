@@ -558,9 +558,9 @@ function copyTableToClipboard(){
 async function scrapePost(postUrl,token){
   const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
   const p=await b.newPage();await p.setViewport({width:1280,height:900});
-  await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
+  await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000}); // 15秒→30秒
   await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-  await new Promise(r=>setTimeout(r,500)); // 1秒→0.5秒
+  await new Promise(r=>setTimeout(r,500));
   await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
   
   // 等待主推文加载（优化：1次重试）
@@ -589,8 +589,12 @@ async function scrapePost(postUrl,token){
       let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
       return src;
     });
-    // 视频检测
-    const hasVideo=!!tweet.querySelector('video')||!!tweet.querySelector('[data-testid="videoPlayer"]');
+    // 视频检测（多种选择器）
+    const hasVideo = !!tweet.querySelector('video') || 
+                     !!tweet.querySelector('[data-testid="videoPlayer"]') ||
+                     !!tweet.querySelector('[data-testid="videoComponent"]') ||
+                     !!tweet.querySelector('[aria-label*="video"]') ||
+                     !!tweet.querySelector('div[data-testid="card.layoutLarge.media"]');
     // 用户信息
     const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
     return{text,time,aria,imgs,hasVideo,handle};
