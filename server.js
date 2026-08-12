@@ -559,36 +559,27 @@ async function scrapePost(postUrl,token){
   const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
   try {
     const p=await b.newPage();await p.setViewport({width:1280,height:900});
-    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
+    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
     await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
     await new Promise(r=>setTimeout(r,1000));
     await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
     
-    // 等待主推文加载（增加重试）
+    // 等待主推文加载（优化：2次重试，缩短单次等待）
     let tweetFound=false;
-    for(let i=0;i<3;i++){
+    for(let i=0;i<2;i++){
       try{
-        await p.waitForSelector('[data-testid="tweet"]',{timeout:10000});
+        await p.waitForSelector('[data-testid="tweet"]',{timeout:8000});
         tweetFound=true;
         break;
       }catch(e){
-        if(i<2){await new Promise(r=>setTimeout(r,3000));await p.reload({waitUntil:'domcontentloaded'});}
+        if(i<1){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});}
       }
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
-    await new Promise(r=>setTimeout(r,2000));
     
-    // 滚动并等待视频元素加载（尝试多种方式）
+    // 快速滚动触发视频加载
     await p.evaluate(()=>window.scrollBy(0,300));
-    await new Promise(r=>setTimeout(r,1000));
-    
-    // 尝试直接等待视频元素出现（最多5秒）
-    try {
-      await p.waitForSelector('video', {timeout: 5000});
-      console.log('✅ 视频元素已加载');
-    } catch(e) {
-      console.log('⚠️  5秒内未检测到video元素，继续检查其他选择器...');
-    }
+    await new Promise(r=>setTimeout(r,1500));
 
     // 提取主帖内容
     const post=await p.evaluate(()=>{
