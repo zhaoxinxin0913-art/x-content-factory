@@ -564,15 +564,16 @@ async function scrapePost(postUrl,token){
     await new Promise(r=>setTimeout(r,1000));
     await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
     
-    // 等待主推文加载（优化：2次重试，缩短单次等待）
+    // 等待主推文加载（增加容错：3次重试）
     let tweetFound=false;
-    for(let i=0;i<2;i++){
+    for(let i=0;i<3;i++){
       try{
-        await p.waitForSelector('[data-testid="tweet"]',{timeout:8000});
+        await p.waitForSelector('[data-testid="tweet"]',{timeout:12000});
         tweetFound=true;
         break;
       }catch(e){
-        if(i<1){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});}
+        console.log(`⚠️ 第${i+1}次加载失败，重试...`);
+        if(i<2){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});}
       }
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
@@ -799,8 +800,8 @@ const server=http.createServer(async(req,res)=>{
           images: result.downloadedImgs.length,
           mediaType: result.videoFile ? '视频' : (result.downloadedImgs.length > 0 ? '图片' : '文字'),
           filesCount: result.downloadedImgs.length + (result.videoFile ? 1 : 0),
-          imagePaths: result.downloadedImgs.map(p => path.join(jobDir, p)),  // 完整路径
-          videoPath: result.videoFile ? path.join(jobDir, result.videoFile) : null
+          imagePaths: result.downloadedImgs.filter(p => p).map(p => path.join(jobDir, p)),  // 过滤空值
+          videoPath: result.videoFile ? path.join(jobDir, result.videoFile) : undefined  // undefined而非null
         };
         uploadToFeishu(feishuData).then(r=>{
           if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);

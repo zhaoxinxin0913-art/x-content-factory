@@ -234,27 +234,16 @@ async function uploadToFeishu(postData) {
     const token = await getTenantToken();
     
     console.log('📋 准备数据...');
+    // 兼容新旧数据格式
     const data = {
-      content: postData.text || '',
-      type: postData.category || 'General',
-      tags: `${postData.cnTags || ''} ${postData.origTags || ''}`.trim(),
-      files: []
+      content: postData.content || postData.text || '',
+      tags: postData.tags || `${postData.cnTags || ''} ${postData.origTags || ''}`.trim(),
+      images: postData.images || 0,
+      mediaType: postData.mediaType || '文字',
+      filesCount: postData.filesCount || 0
     };
-
-    // 收集文件路径
-    if (postData.imagePaths && postData.imagePaths.length > 0) {
-      postData.imagePaths.forEach(img => {
-        const filePath = path.join(postData.outputDir, img);
-        if (fs.existsSync(filePath)) data.files.push(filePath);
-      });
-    }
-
-    if (postData.videoPath) {
-      const filePath = path.join(postData.outputDir, postData.videoPath);
-      if (fs.existsSync(filePath)) data.files.push(filePath);
-    }
-
-    console.log('📤 上传到飞书多维表格...');
+    
+    console.log('📤 上传到飞书多维表格（简化版，暂不上传附件）...');
     const record = await addRecord(token, data);
     
     console.log('✅ 成功上传到飞书！记录ID:', record.record_id);
