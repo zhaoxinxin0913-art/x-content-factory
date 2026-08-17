@@ -240,10 +240,24 @@ async function uploadToFeishu(postData) {
       tags: postData.tags || `${postData.cnTags || ''} ${postData.origTags || ''}`.trim(),
       images: postData.images || 0,
       mediaType: postData.mediaType || '文字',
-      filesCount: postData.filesCount || 0
+      filesCount: postData.filesCount || 0,
+      files: []
     };
     
-    console.log('📤 上传到飞书多维表格（简化版，暂不上传附件）...');
+    // 收集附件文件路径（兼容新旧格式）
+    if (postData.imagePaths && postData.imagePaths.length > 0) {
+      postData.imagePaths.forEach(imgPath => {
+        if (imgPath && fs.existsSync(imgPath)) {
+          data.files.push(imgPath);
+        }
+      });
+    }
+    
+    if (postData.videoPath && fs.existsSync(postData.videoPath)) {
+      data.files.push(postData.videoPath);
+    }
+    
+    console.log(`📤 上传到飞书多维表格（${data.files.length} 个附件）...`);
     const record = await addRecord(token, data);
     
     console.log('✅ 成功上传到飞书！记录ID:', record.record_id);
