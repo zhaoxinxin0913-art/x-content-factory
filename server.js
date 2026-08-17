@@ -793,20 +793,21 @@ const server=http.createServer(async(req,res)=>{
           postUrl:`https://x.com/${handle}/status/${tweetId}`
         };
         
-        // 异步上传到飞书（不阻塞响应）
-        const feishuData = {
-          content: result.post.text,  // 原文
-          tags: origTags.slice(0,5).join(' ') || '#'+category,  // 原文标签
-          images: result.downloadedImgs.length,
-          mediaType: result.videoFile ? '视频' : (result.downloadedImgs.length > 0 ? '图片' : '文字'),
-          filesCount: result.downloadedImgs.length + (result.videoFile ? 1 : 0),
-          imagePaths: result.downloadedImgs.filter(p => p).map(p => path.join(jobDir, p)),  // 过滤空值
-          videoPath: result.videoFile ? path.join(jobDir, result.videoFile) : undefined  // undefined而非null
-        };
-        uploadToFeishu(feishuData).then(r=>{
-          if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
-          else console.error('⚠️  飞书同步失败:',r.error);
-        }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
+        // 异步上传到飞书（已禁用）
+        // const feishuData = {
+        //   content: result.post.text,  // 原文
+        //   tags: origTags.slice(0,5).join(' ') || '#'+category,  // 原文标签
+        //   images: result.downloadedImgs.length,
+        //   mediaType: result.videoFile ? '视频' : (result.downloadedImgs.length > 0 ? '图片' : '文字'),
+        //   filesCount: result.downloadedImgs.length + (result.videoFile ? 1 : 0),
+        //   imagePaths: result.downloadedImgs.filter(p => p).map(p => path.join(jobDir, p)),  // 过滤空值
+        //   videoPath: result.videoFile ? path.join(jobDir, result.videoFile) : undefined  // undefined而非null
+        // };
+        // uploadToFeishu(feishuData).then(r=>{
+        //   if(r.success)console.log('✅ 已同步到飞书，记录ID:',r.record_id);
+        //   else console.error('⚠️  飞书同步失败:',r.error);
+        // }).catch(e=>console.error('⚠️  飞书同步异常:',e.message));
+        console.log('ℹ️  飞书自动同步已禁用');
         
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify(responseData));
