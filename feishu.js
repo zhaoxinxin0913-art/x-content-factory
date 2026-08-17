@@ -136,26 +136,27 @@ function uploadFile(token, filePath) {
 async function addRecord(token, data) {
   const fileTokens = [];
   
-  // 上传附件
-  if (data.files && data.files.length > 0) {
-    console.log(`上传 ${data.files.length} 个附件...`);
-    for (const file of data.files) {
-      try {
-        const token_file = await uploadFile(token, file);
-        fileTokens.push({ file_token: token_file });
-        console.log(`✅ 已上传: ${path.basename(file)}`);
-      } catch (e) {
-        console.error(`⚠️  上传失败 ${path.basename(file)}: ${e.message}`);
-      }
-    }
-  }
+  // 暂时禁用附件上传，等待飞书权限审批通过
+  // TODO: 权限开通后启用
+  // if (data.files && data.files.length > 0) {
+  //   console.log(`上传 ${data.files.length} 个附件...`);
+  //   for (const file of data.files) {
+  //     try {
+  //       const token_file = await uploadFile(token, file);
+  //       fileTokens.push({ file_token: token_file });
+  //       console.log(`✅ 已上传: ${path.basename(file)}`);
+  //     } catch (e) {
+  //       console.error(`⚠️  上传失败 ${path.basename(file)}: ${e.message}`);
+  //     }
+  //   }
+  // }
 
   // 构建记录（使用中文字段名）
   const fields = {
     '帖子内容': data.content || '',  // 原文
     'Tag名称': data.tags || '',        // 原文标签
     '是否匿名': '否',
-    '随机账号': '否'
+    '随机账号': '是'  // 固定选择"是"
   };
   
   console.log('📝 准备写入字段:', JSON.stringify({
