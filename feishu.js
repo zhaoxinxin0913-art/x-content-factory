@@ -85,9 +85,9 @@ function uploadFile(token, filePath) {
     body += `\r\n--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="file_name"\r\n\r\n${fileName}\r\n`;
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nexplorer\r\n`;  // 云空间
+    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nbitable_image\r\n`;  // 多维表格素材
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${FOLDER_ID}\r\n`;  // 云空间文件夹ID
+    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${BASE_ID}\r\n`;  // 多维表格token
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="size"\r\n\r\n${fileSize}\r\n`;
     body += `--${boundary}--\r\n`;
@@ -97,7 +97,7 @@ function uploadFile(token, filePath) {
 
     const options = {
       hostname: 'open.feishu.cn',
-      path: '/open-apis/drive/v1/files/upload_all',
+      path: '/open-apis/drive/v1/medias/upload_all',  // 改用素材上传API
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -139,9 +139,8 @@ function uploadFile(token, filePath) {
 async function addRecord(token, data) {
   const fileTokens = [];
   
-  // 上传附件（暂时禁用 - 飞书多维表格附件API问题待解决）
-  // TODO: 需要找到飞书多维表格附件字段的正确上传方式
-  if (false && data.files && data.files.length > 0) {
+  // 上传附件（使用正确的素材上传API）
+  if (data.files && data.files.length > 0) {
     console.log(`📎 上传 ${data.files.length} 个附件...`);
     for (const file of data.files) {
       try {
