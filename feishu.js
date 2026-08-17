@@ -112,12 +112,14 @@ function uploadFile(token, filePath) {
       res.on('end', () => {
         try {
           const result = JSON.parse(body);
+          console.log(`🔍 飞书上传响应:`, JSON.stringify(result));
           if (result.code === 0) {
             resolve(result.data.file_token);
           } else {
-            reject(new Error(`上传失败: ${result.msg}`));
+            reject(new Error(`上传失败: ${result.msg || JSON.stringify(result)}`));
           }
         } catch (e) {
+          console.error(`❌ 解析响应失败:`, body);
           reject(e);
         }
       });
@@ -185,7 +187,10 @@ async function addRecord(token, data) {
   }
 
   if (fileTokens.length > 0) {
+    console.log(`📎 附件tokens:`, JSON.stringify(fileTokens));
     fields['附件'] = fileTokens;
+  } else {
+    console.log('⚠️  没有成功上传的附件');
   }
 
   const record = JSON.stringify({ fields });
