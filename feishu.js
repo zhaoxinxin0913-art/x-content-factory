@@ -73,6 +73,12 @@ function uploadFile(token, filePath) {
     const fileName = path.basename(filePath);
     const fileSize = fs.statSync(filePath).size;
     const fileBuffer = fs.readFileSync(filePath);
+    
+    // 根据文件类型选择parent_type
+    const isVideo = /\.(mp4|mov|avi|mkv|webm)$/i.test(fileName);
+    const parentType = isVideo ? 'bitable_file' : 'bitable_image';
+    console.log(`🔍 文件类型: ${fileName} → ${parentType}${isVideo ? ' (视频)' : ' (图片)'}`);
+    
     const boundary = '----' + Date.now();
     
     let body = '';
@@ -85,7 +91,7 @@ function uploadFile(token, filePath) {
     body += `\r\n--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="file_name"\r\n\r\n${fileName}\r\n`;
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nbitable_image\r\n`;  // 多维表格素材
+    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\n${parentType}\r\n`;  // 动态选择：视频用bitable_file，图片用bitable_image
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${BASE_ID}\r\n`;  // 多维表格token
     body += `--${boundary}\r\n`;
