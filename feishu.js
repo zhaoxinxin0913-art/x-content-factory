@@ -84,9 +84,9 @@ function uploadFile(token, filePath) {
     body += `\r\n--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="file_name"\r\n\r\n${fileName}\r\n`;
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nbitable_image\r\n`;  // 改为 bitable_image
+    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nbitable_image\r\n`;  // bitable_image 用于多维表格附件
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${BASE_ID}\r\n`;
+    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${TABLE_ID}\r\n`;  // 使用 TABLE_ID 而不是 BASE_ID
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="size"\r\n\r\n${fileSize}\r\n`;
     body += `--${boundary}--\r\n`;
