@@ -85,9 +85,9 @@ function uploadFile(token, filePath) {
     body += `\r\n--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="file_name"\r\n\r\n${fileName}\r\n`;
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nfolder\r\n`;  // 改为 folder（云空间文件夹）
+    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nexplorer\r\n`;  // 云空间
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${FOLDER_ID}\r\n`;  // 使用云空间文件夹ID
+    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${FOLDER_ID}\r\n`;  // 云空间文件夹ID
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="size"\r\n\r\n${fileSize}\r\n`;
     body += `--${boundary}--\r\n`;
@@ -139,8 +139,9 @@ function uploadFile(token, filePath) {
 async function addRecord(token, data) {
   const fileTokens = [];
   
-  // 上传附件（权限已开通）
-  if (data.files && data.files.length > 0) {
+  // 上传附件（暂时禁用 - 飞书多维表格附件API问题待解决）
+  // TODO: 需要找到飞书多维表格附件字段的正确上传方式
+  if (false && data.files && data.files.length > 0) {
     console.log(`📎 上传 ${data.files.length} 个附件...`);
     for (const file of data.files) {
       try {
@@ -194,6 +195,7 @@ async function addRecord(token, data) {
     console.log('⚠️  没有成功上传的附件');
   }
 
+  console.log('📋 即将创建记录，fields:', JSON.stringify(fields).substring(0, 200));
   const record = JSON.stringify({ fields });
 
   return new Promise((resolve, reject) => {
