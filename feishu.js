@@ -7,6 +7,7 @@ const APP_ID = process.env.FEISHU_APP_ID || 'cli_aa87e573e0b99bc9';
 const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
 const BASE_ID = 'Cc9EwQoQIiLxw1kUzoOcg6DHnUd';
 const TABLE_ID = 'tblRbwUBibElOq3J'; // 新表格ID
+const FOLDER_ID = 'I6GzftxwXlvw9AdOYx9c0jQ6n3c'; // 云空间文件夹ID
 
 // 字段映射
 const FIELDS = {
@@ -84,9 +85,9 @@ function uploadFile(token, filePath) {
     body += `\r\n--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="file_name"\r\n\r\n${fileName}\r\n`;
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nbitable_image\r\n`;  // bitable_image 用于多维表格附件
+    body += `Content-Disposition: form-data; name="parent_type"\r\n\r\nfolder\r\n`;  // 改为 folder（云空间文件夹）
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${TABLE_ID}\r\n`;  // 使用 TABLE_ID 而不是 BASE_ID
+    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${FOLDER_ID}\r\n`;  // 使用云空间文件夹ID
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="size"\r\n\r\n${fileSize}\r\n`;
     body += `--${boundary}--\r\n`;
