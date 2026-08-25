@@ -4,4 +4,11 @@ output/
 .DS_Store
 .venv/
 .venv2/
-.env
+
+# 翻译平台运行时产物
+translation-uploads/
+translation-output/
+translation-db.json
+translation-settings.json
+hermes-verify-*.js
+.hermes-verify-*.js

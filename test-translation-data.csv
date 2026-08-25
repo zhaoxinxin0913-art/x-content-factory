@@ -1,0 +1,16 @@
+字段名,描述,类型
+user_status,用户状态,枚举
+order_amount,订单金额,数值
+created_at,创建时间,时间戳
+is_verified,是否已验证,布尔值
+payment_method,支付方式,字符串
+shipping_address,收货地址,文本
+product_category,商品分类,枚举
+discount_rate,折扣率,百分比
+customer_email,客户邮箱,邮件地址
+last_login_time,最后登录时间,时间戳
+total_points,累计积分,整数
+membership_level,会员等级,枚举
+invoice_number,发票号码,字符串
+return_reason,退货原因,文本
+stock_quantity,库存数量,整数

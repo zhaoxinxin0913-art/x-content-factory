@@ -7,6 +7,10 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "puppeteer": "^24.0.0"
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "openai": "^7.5.0",
+    "puppeteer": "^24.0.0",
+    "xlsx": "^0.18.5"
   }
 }
