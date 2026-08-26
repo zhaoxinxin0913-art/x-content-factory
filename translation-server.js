@@ -736,22 +736,43 @@ app.get('/api/export-review/:taskId', (req, res) => {
   const results = DB.results.filter(r => r.taskId === req.params.taskId);
   const reviews = DB.reviews.filter(r => r.taskId === req.params.taskId);
   const sevName = { high: '高分歧', medium: '中分歧', low: '低分歧' };
+  const refCols = task.refColumns || [];
+  const refTypes = task.refTypes || {};
+
+  // 取某行的参考内容，按类型分成「参考语种译文」「参考场景说明」两串
+  const refCells = (rowIndex) => {
+    const row = task.data[rowIndex] || [];
+    const langs = [], scenes = [];
+    for (const ci of refCols) {
+      const val = row[ci];
+      if (val === undefined || val === null || String(val).trim() === '') continue;
+      const header = task.headers[ci] || `列${ci + 1}`;
+      const t = refTypes[ci] || refTypes[String(ci)] || (isLangColumn(header) ? 'lang' : 'scene');
+      (t === 'lang' ? langs : scenes).push(`${header}: ${String(val).trim()}`);
+    }
+    return { langs: langs.join(' | '), scenes: scenes.join(' | ') };
+  };
 
   // 只取需复核且尚未处理的条目
   const rows = results
     .filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id))
-    .map(r => ({
-      '原文': r.sourceText,
-      '目标语言': langName(r.targetLang),
-      '译文A': r.translationA || '',
-      '译文B': r.translationB || '',
-      'C推荐最终译文': r.translation || '',
-      'C选用': r.chosen === 'merged' ? '融合' : (r.chosen || ''),
-      '一致性评分': r.consistency,
-      '分歧说明': r.divergence || '',
-      '风险等级': sevName[r.reviewSeverity] || '需复核',
-      '人工修正译文': ''  // 留空列，供同事填写
-    }));
+    .map(r => {
+      const ref = refCells(r.rowIndex);
+      return {
+        '原文': r.sourceText,
+        '目标语言': langName(r.targetLang),
+        '参考语种译文': ref.langs,
+        '参考场景说明': ref.scenes,
+        '译文A': r.translationA || '',
+        '译文B': r.translationB || '',
+        'C推荐最终译文': r.translation || '',
+        'C选用': r.chosen === 'merged' ? '融合' : (r.chosen || ''),
+        '一致性评分': r.consistency,
+        '分歧说明': r.divergence || '',
+        '风险等级': sevName[r.reviewSeverity] || '需复核',
+        '人工修正译文': ''  // 留空列，供同事填写
+      };
+    });
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '提示': '当前没有需要复核的条目' }]);
