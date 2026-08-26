@@ -436,6 +436,7 @@ function initSettings(){
         <div class="mfield"><label>接口协议</label>
           <select data-f="protocol">
             <option value="openai"${(m.protocol||'openai')==='openai'?' selected':''}>OpenAI 兼容</option>
+            <option value="openai-responses"${m.protocol==='openai-responses'?' selected':''}>OpenAI Responses (gpt)</option>
             <option value="anthropic"${m.protocol==='anthropic'?' selected':''}>Anthropic (Claude)</option>
           </select>
         </div>

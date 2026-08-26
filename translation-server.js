@@ -73,11 +73,44 @@ function saveSettings() {
 function modelConfigured(m) { return !!(m && m.baseUrl && m.apiKey && m.model); }
 // 工具：填充 prompt 占位符
 function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)); }
-// 工具：调用某个模型（支持 OpenAI 兼容 + Anthropic 两种协议）
+// 工具：调用某个模型（支持 openai / openai-responses / anthropic 三种协议）
 async function callLLM(cfg, prompt) {
   const temp = cfg.temperature != null ? cfg.temperature : 0.3;
   if (cfg.protocol === 'anthropic') return callAnthropic(cfg, prompt, temp);
+  if (cfg.protocol === 'openai-responses') return callOpenAIResponses(cfg, prompt, temp);
   return callOpenAI(cfg, prompt, temp);
+}
+
+// OpenAI Responses API：POST {baseUrl}/responses, body 用 input, 文本在 output[].content[].text
+async function callOpenAIResponses(cfg, prompt, temp) {
+  const base = String(cfg.baseUrl || '').replace(/\/+$/, '');
+  const url = /\/v1$/.test(base) ? `${base}/responses` : `${base}/v1/responses`;
+  const p = prompt + '\n\n只返回 JSON，不要任何额外解释或 markdown 代码块。';
+  const send = async (withTemp) => {
+    const payload = withTemp ? { model: cfg.model, input: p, temperature: temp } : { model: cfg.model, input: p };
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'authorization': `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify(payload)
+    });
+  };
+  let res = await send(temp != null && temp < 1);
+  if (res.status === 400) {
+    const t = await res.clone().text();
+    if (/temperature/i.test(t)) res = await send(false);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  // Responses API: 取 output[] 中 type=message 的 content[] 里 output_text 文本（跳过 reasoning 块）
+  let text = '';
+  for (const item of (data.output || [])) {
+    for (const c of (item.content || [])) {
+      if (c.type === 'output_text' && c.text) text += c.text;
+    }
+  }
+  if (!text && data.output_text) text = data.output_text; // 兼容简写字段
+  text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  return JSON.parse(text);
 }
 
 // OpenAI 兼容：POST {baseUrl}/chat/completions
@@ -472,7 +505,7 @@ app.post('/api/settings', (req, res) => {
     const inc = models[k];
     if (!inc) return;
     const cur = SETTINGS.models[k];
-    if (inc.protocol === 'openai' || inc.protocol === 'anthropic') cur.protocol = inc.protocol;
+    if (inc.protocol === 'openai' || inc.protocol === 'openai-responses' || inc.protocol === 'anthropic') cur.protocol = inc.protocol;
     if (typeof inc.baseUrl === 'string') cur.baseUrl = inc.baseUrl.trim();
     if (typeof inc.model === 'string') cur.model = inc.model.trim();
     if (typeof inc.prompt === 'string' && inc.prompt.length) cur.prompt = inc.prompt;
