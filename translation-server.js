@@ -13,54 +13,53 @@ const PORT = 5051;
 const SETTINGS_FILE = path.join(__dirname, 'translation-settings.json');
 
 // 各步默认 prompt（前端可改，占位符会在运行时替换）
-// A 可用: {targetLang} {sourceText} {glossary} {refs}   —— 翻译第一遍
-// B 可用: {targetLang} {sourceText} {glossary} {refs}   —— 翻译第二遍（独立）
-// C 可用: {targetLang} {sourceText} {transA} {transB} {refs}  —— 比对裁决
+// A 可用: {targetLang} {sourceText} {glossary} {refs}   —— 直译派（忠实/术语优先）
+// B 可用: {targetLang} {sourceText} {glossary} {refs}   —— 意译派（地道/语境优先），独立运行看不到A
+// C 可用: {targetLang} {sourceText} {transA} {transB} {glossary} {refs}  —— 独立审校+仲裁（看到全部上下文）
 const DEFAULT_PROMPTS = {
-  A: `你是一个专业的翻译专家。
-任务：将以下内容翻译成{targetLang}。
+  A: `你是一位【严谨直译派】翻译专家，风格偏向忠实原文、术语精确。
+任务：将「源内容」翻译成{targetLang}。
 
-要求：
-1. 保持专业术语准确性
-2. 符合目标语言表达习惯
-3. 简洁清晰，避免冗余
+你的判断路径与优先级：
+1. 术语、专有名词、数字、占位符必须与原文严格对应，不可改写
+2. 宁可保留原文结构，也不要为了通顺而改变含义
+3. 有歧义时，选择字面最贴近原文的解释
 {glossary}{refs}
 
 源内容：{sourceText}
 
-请直接返回翻译结果，不要附加解释。同时评估你的翻译置信度（0-100）。
-返回 JSON 格式：
-{"translation":"翻译结果","confidence":85}`,
-  B: `你是一个资深的本地化翻译专家。
-任务：将以下内容准确翻译成{targetLang}。
+只翻译「源内容」本身。直接返回结果并评估置信度（0-100）。
+返回 JSON：{"translation":"翻译结果","confidence":85}`,
+  B: `你是一位【地道意译派】本地化专家，风格偏向自然流畅、贴合母语者习惯。
+任务：将「源内容」翻译成{targetLang}。
 
-要求：
-1. 忠实原意，用词地道自然
-2. 符合目标语言的行业惯例
-3. 避免生硬直译
+你的判断路径与优先级（独立完成，不参考任何其他译文）：
+1. 优先让译文读起来像母语者写的，符合当地表达与行业惯例
+2. 在不改变原意的前提下，可调整语序、用更自然的措辞
+3. 有歧义时，结合「应用场景/用途」选择最符合实际语境的译法
 {glossary}{refs}
 
 源内容：{sourceText}
 
-请直接返回翻译结果，不要附加解释。同时评估你的翻译置信度（0-100）。
-返回 JSON 格式：
-{"translation":"翻译结果","confidence":85}`,
-  C: `你是一个严格的翻译仲裁专家。现在有两个独立模型对同一内容给出了各自的译文，请你比对、裁决并给出最终译文。
+只翻译「源内容」本身。直接返回结果并评估置信度（0-100）。
+返回 JSON：{"translation":"翻译结果","confidence":85}`,
+  C: `你是一位资深【翻译审校与仲裁】专家。两个风格不同的模型独立翻译了同一内容，请你结合全部上下文独立审校，不要盲目相信任何一方。
 
+【完整上下文】
 源内容（原文）：{sourceText}
-目标语言：{targetLang}{refs}
+目标语言：{targetLang}{glossary}{refs}
 
-译文A：{transA}
-译文B：{transB}
+【两份候选译文】
+译文A（直译派）：{transA}
+译文B（意译派）：{transB}
 
 请你：
-1. 比对两个译文的语义一致性（是否表达同一含义）
-2. 选出更准确的一个作为最终译文；若两者各有优点，可融合出更好的版本
-3. 给出两版的语义一致度评分（1-10，10=完全一致，1=严重分歧）
-4. 若有分歧，简述分歧点
+1. 先【独立判断】源内容的正确译法（对照原文、其他语言参考、场景说明、术语表），再看 A/B——警惕 A、B 可能犯同一个错误（如都误解了同一个多义词、都漏了术语），此时不要被两者"一致"误导，应以你的独立判断为准
+2. 给出最终译文：选 A 或 B 更准确的一版，或融合，或在两者都错时给出你的正确译法
+3. 一致性评分（1-10）：A、B 两版语义是否一致；若你判断两者都偏离正确含义，即使彼此一致也应给低分并说明
+4. 若有分歧或疑点，简述
 
-返回 JSON 格式：
-{"final":"最终译文","consistency":8,"chosen":"A或B或merged","divergence":"分歧说明(无则留空)"}`
+返回 JSON：{"final":"最终译文","consistency":8,"chosen":"A或B或merged或C改写","divergence":"分歧/疑点说明(无则留空)"}`
 };
 
 function blankModel(step) {
@@ -370,13 +369,16 @@ async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '')
     model: fb.engine === 'none' ? 'no-engine-fallback' : `${fb.engine}-translate-fallback-b` };
 }
 
-// 模型 C - 比对裁决：对比 A/B 两版译文，择优/融合出最终译文 + 一致性评分
-async function modelC_arbitrate(sourceText, transA, transB, targetLang, refs = '') {
+// 模型 C - 独立审校+仲裁：结合全部上下文(原文/其他语言/场景/术语表)审校 A/B 两版
+async function modelC_arbitrate(sourceText, transA, transB, targetLang, glossary = {}, refs = '') {
   console.log(`[Model C] 裁决: A="${String(transA).substring(0, 25)}" vs B="${String(transB).substring(0, 25)}"`);
   const cfg = SETTINGS.models.C;
   if (modelConfigured(cfg)) {
     try {
-      const prompt = fillPrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), refs: refs || '' });
+      const glossaryText = Object.keys(glossary).length > 0
+        ? `\n术语表（请严格核对）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
+        : '';
+      const prompt = fillPrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), glossary: glossaryText, refs: refs || '' });
       const r = await callLLM(cfg, prompt);
       return {
         final: r.final || transA,
@@ -881,7 +883,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
         modelB_generate(sourceText, lang, DB.glossary, refs)
       ]);
       // C 比对裁决，择优/融合 + 一致性评分
-      cRes = await modelC_arbitrate(sourceText, aRes.translation, bRes.translation, lang, refs);
+      cRes = await modelC_arbitrate(sourceText, aRes.translation, bRes.translation, lang, DB.glossary, refs);
     } catch (err) {
       console.error(`[Pipeline] Row ${rowIndex + 1}/${lang} 失败: ${err.message}`);
       aRes = aRes || { translation: sourceText, confidence: 0, model: 'error' };
