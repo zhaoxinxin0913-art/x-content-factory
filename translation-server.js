@@ -767,7 +767,7 @@ function buildRefs(task, row) {
     parts.push(`${header}: ${String(val).trim()}`);
   }
   if (!parts.length) return '';
-  return `\n\n参考（同一字段在其他语言/列的已有内容，帮助你准确理解含义，但只翻译上面的源内容）：\n${parts.join('\n')}`;
+  return `\n\n参考信息（同一行的其他列，可能是该文案的其他语言译文、或应用场景/用途说明——用来帮你准确理解含义与语境，但你只需翻译上面的「源内容」本身，不要翻译这些参考）：\n${parts.join('\n')}`;
 }
 
 async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
