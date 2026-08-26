@@ -52,7 +52,7 @@ const DEFAULT_PROMPTS = {
 };
 
 function blankModel(step) {
-  return { baseUrl: '', apiKey: '', model: '', prompt: DEFAULT_PROMPTS[step], temperature: step === 'B' ? 0.2 : 0.3 };
+  return { protocol: 'openai', baseUrl: '', apiKey: '', model: '', prompt: DEFAULT_PROMPTS[step], temperature: step === 'B' ? 0.2 : 0.3 };
 }
 let SETTINGS = { models: { A: blankModel('A'), B: blankModel('B'), C: blankModel('C') } };
 
@@ -73,17 +73,54 @@ function saveSettings() {
 function modelConfigured(m) { return !!(m && m.baseUrl && m.apiKey && m.model); }
 // 工具：填充 prompt 占位符
 function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)); }
-// 工具：调用某个模型（OpenAI 兼容接口）
+// 工具：调用某个模型（支持 OpenAI 兼容 + Anthropic 两种协议）
 async function callLLM(cfg, prompt) {
+  const temp = cfg.temperature != null ? cfg.temperature : 0.3;
+  if (cfg.protocol === 'anthropic') return callAnthropic(cfg, prompt, temp);
+  return callOpenAI(cfg, prompt, temp);
+}
+
+// OpenAI 兼容：POST {baseUrl}/chat/completions
+async function callOpenAI(cfg, prompt, temp) {
   const OpenAI = require('openai');
   const openai = new OpenAI({ baseURL: cfg.baseUrl, apiKey: cfg.apiKey });
   const response = await openai.chat.completions.create({
     model: cfg.model,
     messages: [{ role: 'user', content: prompt }],
-    temperature: cfg.temperature != null ? cfg.temperature : 0.3,
+    temperature: temp,
     response_format: { type: 'json_object' }
   });
   return JSON.parse(response.choices[0].message.content);
+}
+
+// Anthropic Messages API：POST {baseUrl}/v1/messages, 认证 x-api-key
+async function callAnthropic(cfg, prompt, temp) {
+  const base = String(cfg.baseUrl || '').replace(/\/+$/, '');
+  const url = /\/v1$/.test(base) ? `${base}/messages` : `${base}/v1/messages`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': cfg.apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      max_tokens: 1024,
+      temperature: temp,
+      messages: [{ role: 'user', content: prompt + '\n\n只返回 JSON，不要任何额外解释或 markdown 代码块。' }]
+    })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  // Anthropic 返回 content: [{type:'text', text:'...'}]
+  let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  // 去除可能的 ```json ``` 包裹
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  return JSON.parse(text);
 }
 
 // 语种映射表（新增语种只需加一行）
@@ -411,7 +448,7 @@ function maskedSettings() {
   const out = { models: {} };
   ['A', 'B', 'C'].forEach(k => {
     const m = SETTINGS.models[k];
-    out.models[k] = { baseUrl: m.baseUrl || '', apiKey: m.apiKey ? '••••••' : '', model: m.model || '', prompt: m.prompt || '', temperature: m.temperature };
+    out.models[k] = { protocol: m.protocol || 'openai', baseUrl: m.baseUrl || '', apiKey: m.apiKey ? '••••••' : '', model: m.model || '', prompt: m.prompt || '', temperature: m.temperature };
   });
   return out;
 }
@@ -432,6 +469,7 @@ app.post('/api/settings', (req, res) => {
     const inc = models[k];
     if (!inc) return;
     const cur = SETTINGS.models[k];
+    if (inc.protocol === 'openai' || inc.protocol === 'anthropic') cur.protocol = inc.protocol;
     if (typeof inc.baseUrl === 'string') cur.baseUrl = inc.baseUrl.trim();
     if (typeof inc.model === 'string') cur.model = inc.model.trim();
     if (typeof inc.prompt === 'string' && inc.prompt.length) cur.prompt = inc.prompt;
@@ -443,12 +481,17 @@ app.post('/api/settings', (req, res) => {
   res.json({ success: true, settings: maskedSettings() });
 });
 
-// 测试某个模型连通性（body: {step:'A'|'B'|'C'} 或直接 {baseUrl,apiKey,model}）
+// 测试某个模型连通性（body: {step,protocol,baseUrl,apiKey,model}）
 app.post('/api/settings/test', async (req, res) => {
   const b = req.body || {};
-  let cfg;
-  if (b.step && SETTINGS.models[b.step]) cfg = SETTINGS.models[b.step];
-  else cfg = { baseUrl: b.baseUrl, apiKey: (b.apiKey && b.apiKey !== '••••••') ? b.apiKey : (SETTINGS.models[b.step] && SETTINGS.models[b.step].apiKey), model: b.model };
+  const stored = (b.step && SETTINGS.models[b.step]) ? SETTINGS.models[b.step] : {};
+  const cfg = {
+    protocol: b.protocol || stored.protocol || 'openai',
+    baseUrl: b.baseUrl != null ? b.baseUrl : stored.baseUrl,
+    model: b.model != null ? b.model : stored.model,
+    apiKey: (b.apiKey && b.apiKey !== '••••••') ? b.apiKey : stored.apiKey,
+    temperature: 0
+  };
   if (!cfg.baseUrl || !cfg.apiKey || !cfg.model) {
     return res.json({ success: true, reachable: false, error: '缺少地址/Key/模型名' });
   }

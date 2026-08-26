@@ -212,9 +212,9 @@
   .mrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   @media(max-width:600px){.mrow{grid-template-columns:1fr}}
   .mfield label{font-size:12px;font-weight:700;color:var(--ink2);display:block;margin:8px 0 5px}
-  .mfield input,.mfield textarea{width:100%;font-family:inherit;font-size:13.5px;padding:9px 12px;
+  .mfield input,.mfield textarea,.mfield select{width:100%;font-family:inherit;font-size:13.5px;padding:9px 12px;
     border:1px solid var(--line);border-radius:10px;background:#fff}
-  .mfield input:focus,.mfield textarea:focus{outline:none;border-color:var(--brand)}
+  .mfield input:focus,.mfield textarea:focus,.mfield select:focus{outline:none;border-color:var(--brand)}
   .mfield textarea{min-height:120px;resize:vertical;line-height:1.5;font-size:13px}
   .prompt-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 5px}
   .prompt-head label{font-size:12px;font-weight:700;color:var(--ink2)}
@@ -432,11 +432,17 @@ function initSettings(){
         <div><div class="mcard-title">${STEP_META[k].title}</div><div class="mcard-sub">${STEP_META[k].sub}</div></div>
         <span class="mcard-state ${on?'on':'off'}" data-role="state">${on?'已启用':'未配置→兜底'}</span>
       </div>
-      <div class="mrow">
-        <div class="mfield"><label>接口地址 (Base URL)</label><input data-f="baseUrl" placeholder="https://api.deepseek.com/v1" value="${esc(m.baseUrl)}"></div>
-        <div class="mfield"><label>模型名</label><input data-f="model" placeholder="deepseek-chat / gpt-4o / kimi-k2.6" value="${esc(m.model)}"></div>
+      <div class="mrow" style="grid-template-columns:150px 1fr">
+        <div class="mfield"><label>接口协议</label>
+          <select data-f="protocol">
+            <option value="openai"${(m.protocol||'openai')==='openai'?' selected':''}>OpenAI 兼容</option>
+            <option value="anthropic"${m.protocol==='anthropic'?' selected':''}>Anthropic (Claude)</option>
+          </select>
+        </div>
+        <div class="mfield"><label>模型名</label><input data-f="model" placeholder="deepseek-chat / gpt-4o / claude-sonnet-4" value="${esc(m.model)}"></div>
       </div>
-      <div class="mfield"><label>API Key</label><input data-f="apiKey" type="password" placeholder="${m.apiKey?'已设置（留空则不修改）':'sk-...'}" value=""></div>
+      <div class="mfield"><label>接口地址 (Base URL)</label><input data-f="baseUrl" placeholder="OpenAI: https://api.deepseek.com/v1 ｜ Anthropic: http://your-proxy/（自动补 /v1/messages）" value="${esc(m.baseUrl)}"></div>
+      <div class="mfield"><label>API Key</label><input data-f="apiKey" type="password" placeholder="${m.apiKey?'已设置（留空则不修改）':'sk-... / x-api-key'}" value=""></div>
       <div class="prompt-head"><label>提示词 (Prompt)</label><span class="prompt-vars">可用变量: ${STEP_META[k].vars}</span></div>
       <div class="mfield"><textarea data-f="prompt">${esc(m.prompt)}</textarea></div>
       <div class="mcard-actions">
@@ -464,7 +470,7 @@ function initSettings(){
 
   function readCard(card){
     const g=f=>card.querySelector(`[data-f="${f}"]`).value;
-    return { baseUrl:g('baseUrl').trim(), model:g('model').trim(), apiKey:g('apiKey').trim(), prompt:g('prompt') };
+    return { protocol:g('protocol'), baseUrl:g('baseUrl').trim(), model:g('model').trim(), apiKey:g('apiKey').trim(), prompt:g('prompt') };
   }
   function bindCards(){
     document.querySelectorAll('.mcard').forEach(card=>{
@@ -480,7 +486,7 @@ function initSettings(){
         out.innerHTML='<span class="spin"></span> 测试中…';
         try{
           const r=await fetch('/api/settings/test',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({baseUrl:d.baseUrl,apiKey:d.apiKey,model:d.model})}).then(x=>x.json());
+            body:JSON.stringify({protocol:d.protocol,baseUrl:d.baseUrl,apiKey:d.apiKey,model:d.model})}).then(x=>x.json());
           out.innerHTML = r.reachable ? '<span style="color:var(--brand-ink)">✅ 连接成功</span>' : `<span style="color:#b23c34">❌ ${esc(r.error||'不可达')}</span>`;
         }catch(e){ out.innerHTML=`<span style="color:#b23c34">❌ ${esc(e.message)}</span>`; }
       };
@@ -490,7 +496,7 @@ function initSettings(){
     const models={};
     document.querySelectorAll('.mcard').forEach(card=>{
       const d=readCard(card);
-      const o={ baseUrl:d.baseUrl, model:d.model, prompt:d.prompt };
+      const o={ protocol:d.protocol, baseUrl:d.baseUrl, model:d.model, prompt:d.prompt };
       if(d.apiKey) o.apiKey=d.apiKey; // 留空不改
       models[card.dataset.step]=o;
     });
