@@ -728,6 +728,53 @@ app.get('/api/export/:taskId', (req, res) => {
   res.sendFile(outputPath);
 });
 
+// 导出「待复核条目」——只含需人工复核的行，方便发给同事看
+app.get('/api/export-review/:taskId', (req, res) => {
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+
+  const results = DB.results.filter(r => r.taskId === req.params.taskId);
+  const reviews = DB.reviews.filter(r => r.taskId === req.params.taskId);
+  const sevName = { high: '高分歧', medium: '中分歧', low: '低分歧' };
+
+  // 只取需复核且尚未处理的条目
+  const rows = results
+    .filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id))
+    .map(r => ({
+      '原文': r.sourceText,
+      '目标语言': langName(r.targetLang),
+      '译文A': r.translationA || '',
+      '译文B': r.translationB || '',
+      'C推荐最终译文': r.translation || '',
+      'C选用': r.chosen === 'merged' ? '融合' : (r.chosen || ''),
+      '一致性评分': r.consistency,
+      '分歧说明': r.divergence || '',
+      '风险等级': sevName[r.reviewSeverity] || '需复核',
+      '人工修正译文': ''  // 留空列，供同事填写
+    }));
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '提示': '当前没有需要复核的条目' }]);
+  XLSX.utils.book_append_sheet(wb, ws, 'ReviewQueue');
+
+  const base = String(task.filename || task.id).replace(/\.(xlsx|xls|csv)$/i, '');
+  const setDownloadName = (name) => {
+    res.setHeader('Content-Disposition', `attachment; filename="review.${name.split('.').pop()}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+  };
+  const format = (req.query.format || 'xlsx').toLowerCase();
+  if (format === 'csv') {
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    const outputPath = path.join(OUTPUT_DIR, `${task.id}_review.csv`);
+    fs.writeFileSync(outputPath, '\ufeff' + csv, 'utf8');
+    setDownloadName(`${base}(待复核).csv`);
+    return res.sendFile(outputPath);
+  }
+  const outputPath = path.join(OUTPUT_DIR, `${task.id}_review.xlsx`);
+  XLSX.writeFile(wb, outputPath);
+  setDownloadName(`${base}(待复核).xlsx`);
+  res.sendFile(outputPath);
+});
+
 // 术语表管理
 app.get('/api/glossary', (req, res) => {
   res.json({ success: true, glossary: DB.glossary });

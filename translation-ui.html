@@ -352,8 +352,14 @@
     <h1 class="page">人工复核台</h1>
     <p class="page-sub">模型 C 提取的疑难条目。通过或修正 —— 修正结果将沉淀为训练样本，反哺模型 A。</p>
     <div class="card" id="reviewCard">
-      <h2><svg class="ic" viewBox="0 0 24 24"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg>待复核队列 <span id="reviewCount" style="font-size:13px;color:var(--muted);font-weight:600"></span></h2>
-      <div class="hint">原文与译文并排展示，修正框留空则默认采用建议。</div>
+      <h2 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <span style="display:flex;align-items:center;gap:8px"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg>待复核队列 <span id="reviewCount" style="font-size:13px;color:var(--muted);font-weight:600"></span></span>
+        <span style="display:flex;gap:8px">
+          <button class="btn btn-soft" id="exportReviewXlsx" style="font-size:13px"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>导出待复核(Excel)</button>
+          <button class="btn btn-soft" id="exportReviewCsv" style="font-size:13px">CSV</button>
+        </span>
+      </h2>
+      <div class="hint">原文与译文并排展示，修正框留空则默认采用建议。点右上角可导出待复核条目发给同事。</div>
       <div id="reviewList"></div>
     </div>
     <div class="footer-actions">
@@ -717,6 +723,9 @@ async function submitReview(resultId,decision,finalText,el){
   }catch(e){ toast('提交失败：'+e.message,'err'); }
 }
 $('#toExportBtn').onclick=async()=>{ await loadExportStats(); showView(5); };
+// 导出待复核条目(发给同事)
+$('#exportReviewXlsx').onclick=()=>{ if(!state.taskId){toast('请先完成翻译','err');return;} window.location='/api/export-review/'+state.taskId+'?format=xlsx'; toast('开始下载待复核条目','ok'); };
+$('#exportReviewCsv').onclick=()=>{ if(!state.taskId){toast('请先完成翻译','err');return;} window.location='/api/export-review/'+state.taskId+'?format=csv'; toast('开始下载待复核条目(CSV)','ok'); };
 
 // ---- export ----
 async function loadExportStats(){
