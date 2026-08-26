@@ -543,8 +543,10 @@ app.post('/api/settings/test', async (req, res) => {
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   try {
     const filePath = req.file.path;
-    const origName = (req.file.originalname || '').toLowerCase();
-    const isCsv = origName.endsWith('.csv') || /text\/csv|application\/csv/.test(req.file.mimetype || '');
+    // multer 把 originalname 当 latin1 解析，中文名会乱码 → 还原成 UTF-8
+    const fixName = s => { try { return Buffer.from(String(s || ''), 'latin1').toString('utf8'); } catch { return String(s || ''); } };
+    const origName = fixName(req.file.originalname);
+    const isCsv = origName.toLowerCase().endsWith('.csv') || /text\/csv|application\/csv/.test(req.file.mimetype || '');
 
     let workbook;
     if (isCsv) {
@@ -568,7 +570,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const taskId = `task_${Date.now()}`;
     const task = {
       id: taskId,
-      filename: req.file.originalname,
+      filename: origName,
       uploadTime: new Date().toISOString(),
       headers,
       rowCount: rows.length,
@@ -721,18 +723,29 @@ app.get('/api/export/:taskId', (req, res) => {
   const ws = XLSX.utils.json_to_sheet(exportData);
   XLSX.utils.book_append_sheet(wb, ws, 'Translations');
 
+  // 构造下载文件名：原文件名(去扩展名) + (翻译后) + 扩展名
+  const base = String(task.filename || task.id).replace(/\.(xlsx|xls|csv)$/i, '');
+  const dlName = ext => `${base}(翻译后).${ext}`;
+  // 中文文件名需 RFC5987 编码放进 Content-Disposition，否则浏览器按 latin1 解析成乱码
+  const setDownloadName = (name) => {
+    const encoded = encodeURIComponent(name);
+    res.setHeader('Content-Disposition', `attachment; filename="download.${name.split('.').pop()}"; filename*=UTF-8''${encoded}`);
+  };
+
   const format = (req.query.format || 'xlsx').toLowerCase();
   if (format === 'csv') {
     const csv = XLSX.utils.sheet_to_csv(ws);
     const outputPath = path.join(OUTPUT_DIR, `${task.id}_export.csv`);
     // 加 BOM 保证 Excel 正确识别 UTF-8 中文
     fs.writeFileSync(outputPath, '\ufeff' + csv, 'utf8');
-    return res.download(outputPath, `${task.filename || task.id}_translated.csv`);
+    setDownloadName(dlName('csv'));
+    return res.sendFile(outputPath);
   }
 
   const outputPath = path.join(OUTPUT_DIR, `${task.id}_export.xlsx`);
   XLSX.writeFile(wb, outputPath);
-  res.download(outputPath, `${task.filename || task.id}_translated.xlsx`);
+  setDownloadName(dlName('xlsx'));
+  res.sendFile(outputPath);
 });
 
 // 术语表管理
