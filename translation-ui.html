@@ -201,6 +201,9 @@
   .note{background:linear-gradient(160deg,var(--brand-soft),#fff);border:1px solid #d0ecdf;
     border-left:4px solid var(--brand);border-radius:12px;padding:11px 15px;color:var(--brand-ink);font-size:14px}
   .note b{color:var(--brand-ink);font-weight:800}
+  .rtag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;margin-right:5px;vertical-align:middle}
+  .rtag.lang{background:#e4f0ff;color:#2160b5}
+  .rtag.scene{background:#fdf1df;color:#a9701f}
 
   /* 模型设置卡片 */
   .mcard{border:1px solid var(--line);border-radius:var(--rmd);padding:18px;margin-bottom:14px;background:#fbfdfe}
@@ -306,7 +309,7 @@
       <div id="colHint" class="note" style="margin-top:10px"></div>
       <div class="tbl-wrap" id="previewWrap"></div>
       <label class="field-label" style="margin-top:18px">参考列（可选，多选）</label>
-      <div class="hint" style="margin-top:0">勾选同一行的其他列作为参考——可以是<b>其他语言的已有译文</b>，也可以是<b>应用场景/用途说明</b>（如“论坛发帖按钮”）。帮模型准确理解含义与语境、提升翻译准确度，不增加翻译耗时。</div>
+      <div class="hint" style="margin-top:0">勾选同一行的其他列作为参考。系统自动标注类型：<b style="color:#2160b5">🌐 语种译文</b>（en/th/tc 等语言列）或 <b style="color:#a9701f">📝 场景说明</b>（ch/备注等）。帮模型理解语境、消歧提准，不增加耗时。</div>
       <div class="lang-grid" id="refGrid" style="margin-top:8px"></div>
     </div>
     <div class="card">
@@ -570,14 +573,27 @@ function buildColSelect(){
   updateColHint();
   renderRefGrid();
 }
+// 判断列名是否是语言代码（en/id/th/vi/ph/ar/tc/tr/zh/ja/ko/es/fr/pt...）→ 语种译文；否则 → 场景/说明
+function refColType(header){
+  const h=String(header||'').trim().toLowerCase();
+  const langCodes=['en','en-us','en-gb','id','th','vi','ph','fil','tl','ar','tc','sc','zh','zh-cn','zh-tw','cn','tw','hk','ja','jp','ko','kr','es','fr','pt','de','it','ru','nl','tr-lang','ms','hi'];
+  // 常见"语种列"命名：纯语言代码，或 xxx_en / en_text 之类
+  if(langCodes.includes(h)) return 'lang';
+  if(/^(text_|val_|value_)?(en|id|th|vi|ph|fil|tl|ar|tc|sc|zh|cn|tw|ja|jp|ko|kr|es|fr|pt|de|it|ru)(_|$|-)/.test(h)) return 'lang';
+  return 'scene'; // ch/场景/desc/note/说明/备注 等都归为场景说明
+}
 function renderRefGrid(){
   const rows=state.preview||[];
   const sample=i=>{ for(const r of rows){ if(r[i]!=null&&String(r[i]).trim()!=='') return String(r[i]); } return ''; };
   $('#refGrid').innerHTML = state.headers.map((h,i)=>{
     if(i===state.colIndex) return ''; // 原文列自身不作参考
     const ex=sample(i); const sel=state.refColumns.includes(i);
-    return `<div class="lang-chip ${sel?'sel':''}" data-ref="${i}">
-      <span>${h||('列'+(i+1))}</span>${ex?`<span style="color:var(--muted);font-size:12px">${esc(ex.slice(0,16))}</span>`:''}<span class="ck"></span>
+    const type=refColType(h);
+    const badge=type==='lang'
+      ? `<span class="rtag lang">🌐 语种译文</span>`
+      : `<span class="rtag scene">📝 场景说明</span>`;
+    return `<div class="lang-chip ${sel?'sel':''}" data-ref="${i}" data-rtype="${type}">
+      <span>${badge} ${h||('列'+(i+1))}</span>${ex?`<span style="color:var(--muted);font-size:12px">${esc(ex.slice(0,16))}</span>`:''}<span class="ck"></span>
     </div>`;
   }).join('');
   document.querySelectorAll('#refGrid .lang-chip').forEach(c=>{

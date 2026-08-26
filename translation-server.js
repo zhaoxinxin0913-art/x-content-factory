@@ -755,19 +755,31 @@ app.get('/api/training-samples', (req, res) => {
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
 const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '6', 10);
 
-// 从参考列构建上下文文本（同一字段的其他语言已有译文，帮助模型消歧）
+// 判断列名是否为语言代码 → 语种译文；否则 → 场景/用途说明
+function isLangColumn(header) {
+  const h = String(header || '').trim().toLowerCase();
+  const codes = ['en','en-us','en-gb','id','th','vi','ph','fil','tl','ar','tc','sc','zh','zh-cn','zh-tw','cn','tw','hk','ja','jp','ko','kr','es','fr','pt','de','it','ru','nl','ms','hi'];
+  if (codes.includes(h)) return true;
+  return /^(text_|val_|value_)?(en|id|th|vi|ph|fil|tl|ar|tc|sc|zh|cn|tw|ja|jp|ko|kr|es|fr|pt|de|it|ru)(_|$|-)/.test(h);
+}
+
+// 从参考列构建上下文文本，按「其他语言译文」与「场景/用途说明」分组，帮模型消歧
 function buildRefs(task, row) {
   const cols = task.refColumns || [];
   if (!cols.length) return '';
-  const parts = [];
+  const langParts = [], sceneParts = [];
   for (const ci of cols) {
     const val = row[ci];
     if (val === undefined || val === null || String(val).trim() === '') continue;
     const header = task.headers[ci] || `列${ci + 1}`;
-    parts.push(`${header}: ${String(val).trim()}`);
+    const line = `${header}: ${String(val).trim()}`;
+    (isLangColumn(header) ? langParts : sceneParts).push(line);
   }
-  if (!parts.length) return '';
-  return `\n\n参考信息（同一行的其他列，可能是该文案的其他语言译文、或应用场景/用途说明——用来帮你准确理解含义与语境，但你只需翻译上面的「源内容」本身，不要翻译这些参考）：\n${parts.join('\n')}`;
+  if (!langParts.length && !sceneParts.length) return '';
+  let out = '\n\n参考信息（用来帮你准确理解含义与语境，但你只需翻译上面的「源内容」本身，不要翻译这些参考）：';
+  if (sceneParts.length) out += `\n【应用场景/用途说明】\n${sceneParts.join('\n')}`;
+  if (langParts.length) out += `\n【该文案的其他语言译文】\n${langParts.join('\n')}`;
+  return out;
 }
 
 async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
