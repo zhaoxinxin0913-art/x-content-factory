@@ -13,9 +13,9 @@ const PORT = 5051;
 const SETTINGS_FILE = path.join(__dirname, 'translation-settings.json');
 
 // 各步默认 prompt（前端可改，占位符会在运行时替换）
-// A 可用: {targetLang} {sourceText} {glossary} {refs}
-// B 可用: {sourceText} {translatedText} {targetLang} {refs}
-// C 可用: {reports}
+// A 可用: {targetLang} {sourceText} {glossary} {refs}   —— 翻译第一遍
+// B 可用: {targetLang} {sourceText} {glossary} {refs}   —— 翻译第二遍（独立）
+// C 可用: {targetLang} {sourceText} {transA} {transB} {refs}  —— 比对裁决
 const DEFAULT_PROMPTS = {
   A: `你是一个专业的翻译专家。
 任务：将以下内容翻译成{targetLang}。
@@ -31,24 +31,36 @@ const DEFAULT_PROMPTS = {
 请直接返回翻译结果，不要附加解释。同时评估你的翻译置信度（0-100）。
 返回 JSON 格式：
 {"translation":"翻译结果","confidence":85}`,
-  B: `你是一个严格的翻译质量校验专家。
-任务：评估以下翻译的质量。
+  B: `你是一个资深的本地化翻译专家。
+任务：将以下内容准确翻译成{targetLang}。
+
+要求：
+1. 忠实原意，用词地道自然
+2. 符合目标语言的行业惯例
+3. 避免生硬直译
+{glossary}{refs}
+
+源内容：{sourceText}
+
+请直接返回翻译结果，不要附加解释。同时评估你的翻译置信度（0-100）。
+返回 JSON 格式：
+{"translation":"翻译结果","confidence":85}`,
+  C: `你是一个严格的翻译仲裁专家。现在有两个独立模型对同一内容给出了各自的译文，请你比对、裁决并给出最终译文。
 
 源内容（原文）：{sourceText}
-翻译结果：{translatedText}
 目标语言：{targetLang}{refs}
 
-评估维度：准确性、术语、通顺度、一致性。
-请给出：总分(1-10)、问题类型(术语错误/漏译/歧义/不通顺/过长/不当)、具体问题描述、修改建议。
-返回 JSON 格式：
-{"score":8,"issues":["术语错误"],"description":"具体问题","suggestion":"修改建议"}`,
-  C: `你是一个翻译问题汇总专家。
-以下是一批翻译校验报告（JSON 数组）：
-{reports}
+译文A：{transA}
+译文B：{transB}
 
-请提炼出需要人工复核的共性问题与改进建议。
+请你：
+1. 比对两个译文的语义一致性（是否表达同一含义）
+2. 选出更准确的一个作为最终译文；若两者各有优点，可融合出更好的版本
+3. 给出两版的语义一致度评分（1-10，10=完全一致，1=严重分歧）
+4. 若有分歧，简述分歧点
+
 返回 JSON 格式：
-{"summary":"共性问题概述","suggestions":["建议1","建议2"]}`
+{"final":"最终译文","consistency":8,"chosen":"A或B或merged","divergence":"分歧说明(无则留空)"}`
 };
 
 function blankModel(step) {
@@ -314,10 +326,9 @@ function simpleQualityScore(sourceText, translatedText, targetLang) {
 // 模型调用封装（支持 CC Switch 和兜底方案）
 // ============================================================
 
-// 模型 A - 生成器（翻译）
+// 模型 A - 翻译第一遍
 async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '') {
-  console.log(`[Model A] Translating: ${sourceText.substring(0, 50)}... to ${targetLang}`);
-
+  console.log(`[Model A] 翻译一: ${sourceText.substring(0, 40)}... → ${targetLang}`);
   const cfg = SETTINGS.models.A;
   if (modelConfigured(cfg)) {
     try {
@@ -326,96 +337,64 @@ async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '')
         : '';
       const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
-      return {
-        translation: result.translation || sourceText,
-        confidence: result.confidence || 50,
-        model: cfg.model
-      };
+      return { translation: result.translation || sourceText, confidence: result.confidence || 50, model: cfg.model };
     } catch (error) {
-      console.error('[Model A] LLM error, fallback to free engine:', error.message);
+      console.error('[Model A] LLM error, fallback:', error.message);
     }
   }
-
-  // 兜底方案：MyMemory 优先，Google 次之
   const fb = await fallbackTranslate(sourceText, targetLang);
-  const translated = fb.translation;
-  const unchanged = translated === sourceText;
-  return {
-    translation: translated || sourceText,
-    confidence: unchanged ? 30 : (fb.engine === 'mymemory' ? 72 : 68),
-    model: fb.engine === 'none' ? 'no-engine-fallback' : `${fb.engine}-translate-fallback`
-  };
+  const unchanged = fb.translation === sourceText;
+  return { translation: fb.translation || sourceText, confidence: unchanged ? 30 : (fb.engine === 'mymemory' ? 72 : 68),
+    model: fb.engine === 'none' ? 'no-engine-fallback' : `${fb.engine}-translate-fallback` };
 }
 
-// 模型 B - 校验器（质检）
-async function modelB_validate(sourceText, translatedText, targetLang, refs = '') {
-  console.log(`[Model B] Validating: ${translatedText.substring(0, 50)}...`);
-
+// 模型 B - 翻译第二遍（独立翻译，不看 A 的结果）
+async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '') {
+  console.log(`[Model B] 翻译二: ${sourceText.substring(0, 40)}... → ${targetLang}`);
   const cfg = SETTINGS.models.B;
   if (modelConfigured(cfg)) {
     try {
-      const prompt = fillPrompt(cfg.prompt, { sourceText, translatedText, targetLang: langName(targetLang), refs: refs || '' });
+      const glossaryText = Object.keys(glossary).length > 0
+        ? `\n术语表（请严格遵守）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
+        : '';
+      const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
+      return { translation: result.translation || sourceText, confidence: result.confidence || 50, model: cfg.model };
+    } catch (error) {
+      console.error('[Model B] LLM error, fallback:', error.message);
+    }
+  }
+  const fb = await fallbackTranslate(sourceText, targetLang);
+  const unchanged = fb.translation === sourceText;
+  return { translation: fb.translation || sourceText, confidence: unchanged ? 30 : (fb.engine === 'mymemory' ? 70 : 66),
+    model: fb.engine === 'none' ? 'no-engine-fallback' : `${fb.engine}-translate-fallback-b` };
+}
+
+// 模型 C - 比对裁决：对比 A/B 两版译文，择优/融合出最终译文 + 一致性评分
+async function modelC_arbitrate(sourceText, transA, transB, targetLang, refs = '') {
+  console.log(`[Model C] 裁决: A="${String(transA).substring(0, 25)}" vs B="${String(transB).substring(0, 25)}"`);
+  const cfg = SETTINGS.models.C;
+  if (modelConfigured(cfg)) {
+    try {
+      const prompt = fillPrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), refs: refs || '' });
+      const r = await callLLM(cfg, prompt);
       return {
-        score: result.score || 5,
-        issues: result.issues || [],
-        description: result.description || '',
-        suggestion: result.suggestion || '',
+        final: r.final || transA,
+        consistency: typeof r.consistency === 'number' ? r.consistency : 5,
+        chosen: r.chosen || 'A',
+        divergence: r.divergence || '',
         model: cfg.model
       };
     } catch (error) {
-      console.error('[Model B] LLM error, fallback to rule validation:', error.message);
+      console.error('[Model C] LLM error, fallback to rule arbitration:', error.message);
     }
   }
-
-  // 兜底方案：简单规则校验
-  const validation = simpleQualityScore(sourceText, translatedText, targetLang);
-  return {
-    ...validation,
-    model: 'rule-based-validator-fallback'
-  };
+  // 兜底裁决：字符串归一化后比对一致性
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const same = norm(transA) === norm(transB);
+  const consistency = same ? 10 : (norm(transA) && norm(transB) ? 5 : 2);
+  return { final: transA || transB, consistency, chosen: 'A', divergence: same ? '' : '两版不一致（规则兜底无法判断优劣）', model: 'rule-based-arbiter' };
 }
-
-// 模型 C - 提取器（问题汇总）
-async function modelC_extract(validationReports) {
-  console.log(`[Model C] Extracting issues from ${validationReports.length} reports`);
-
-  // 规则提取：评分 ≤ 6 或有问题标签的项（决定哪些进人工复核队列）
-  const needsReview = validationReports
-    .map((r, i) => ({
-      index: i + 1,
-      report: r,
-      severity: r.validationScore <= 5 ? 'high' : r.validationScore <= 6 ? 'medium' : 'low',
-      category: (r.validationIssues && r.validationIssues.length > 0) ? r.validationIssues[0] : '低分',
-      reason: r.validationDescription || '翻译质量需要改进',
-      priority: r.validationScore <= 5 ? 1 : 2
-    }))
-    .filter(item => item.report.validationScore <= 6 || (item.report.validationIssues && item.report.validationIssues.length > 0))
-    .sort((a, b) => a.priority - b.priority);
-
-  const cfg = SETTINGS.models.C;
-  let summary = null;
-  if (modelConfigured(cfg) && needsReview.length > 0) {
-    try {
-      const reports = JSON.stringify(needsReview.map(x => ({
-        source: x.report.sourceText, translation: x.report.translation,
-        score: x.report.validationScore, issues: x.report.validationIssues
-      })));
-      const prompt = fillPrompt(cfg.prompt, { reports });
-      summary = await callLLM(cfg, prompt);
-    } catch (error) {
-      console.error('[Model C] LLM error, skip summary:', error.message);
-    }
-  }
-
-  return {
-    needsReview,
-    summary,
-    stats: { total: validationReports.length, issues: needsReview.length, needReview: needsReview.length },
-    model: modelConfigured(cfg) ? cfg.model : 'rule-based-extractor'
-  };
-}
-
 // ============================================================
 // API 路由
 // ============================================================
@@ -801,29 +780,47 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
 
   const totalRows = task.data.length;
 
-  // 处理单条 (rowIndex, lang) 作业
+  const REVIEW_THRESHOLD = parseInt(process.env.REVIEW_THRESHOLD || '6', 10); // 一致性 ≤ 阈值 → 人工复核
+
+  // 处理单条 (rowIndex, lang) 作业：A/B 双翻译 → C 比对裁决
   async function processOne(rowIndex, lang) {
     const raw = task.data[rowIndex][columnIndex];
     if (raw === undefined || raw === null || String(raw) === '') return null;
     const sourceText = String(raw);
     const refs = buildRefs(task, task.data[rowIndex]);
 
-    let aResult, bResult;
+    let aRes, bRes, cRes;
     try {
-      aResult = await modelA_generate(sourceText, lang, DB.glossary, refs);
-      bResult = await modelB_validate(sourceText, aResult.translation, lang, refs);
+      // A、B 两个模型独立翻译（并行）
+      [aRes, bRes] = await Promise.all([
+        modelA_generate(sourceText, lang, DB.glossary, refs),
+        modelB_generate(sourceText, lang, DB.glossary, refs)
+      ]);
+      // C 比对裁决，择优/融合 + 一致性评分
+      cRes = await modelC_arbitrate(sourceText, aRes.translation, bRes.translation, lang, refs);
     } catch (err) {
       console.error(`[Pipeline] Row ${rowIndex + 1}/${lang} 失败: ${err.message}`);
-      aResult = { translation: sourceText, confidence: 0, model: 'error' };
-      bResult = { score: 1, issues: ['处理异常'], description: err.message, suggestion: '需人工复核', model: 'error' };
+      aRes = aRes || { translation: sourceText, confidence: 0, model: 'error' };
+      bRes = bRes || { translation: sourceText, confidence: 0, model: 'error' };
+      cRes = { final: aRes.translation, consistency: 1, chosen: 'A', divergence: err.message, model: 'error' };
     }
+
+    const needsReview = cRes.consistency <= REVIEW_THRESHOLD;
     const result = {
       id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       taskId, rowIndex, sourceText, targetLang: lang,
-      translation: aResult.translation, confidence: aResult.confidence,
-      validationScore: bResult.score, validationIssues: bResult.issues,
-      validationDescription: bResult.description, validationSuggestion: bResult.suggestion,
-      modelA: aResult.model, modelB: bResult.model,
+      translation: cRes.final,            // 最终译文 = C 裁决结果
+      translationA: aRes.translation,     // A 版
+      translationB: bRes.translation,     // B 版
+      chosen: cRes.chosen,                // C 选了 A/B/merged
+      consistency: cRes.consistency,      // 一致性评分 1-10
+      divergence: cRes.divergence,        // 分歧说明
+      validationScore: cRes.consistency,  // 兼容旧字段：用一致性作为分数
+      confidence: Math.round((aRes.confidence + bRes.confidence) / 2),
+      needsReview,
+      reviewReason: needsReview ? (cRes.divergence || `两版一致性偏低(${cRes.consistency}/10)`) : '',
+      reviewSeverity: cRes.consistency <= 3 ? 'high' : cRes.consistency <= 6 ? 'medium' : 'low',
+      modelA: aRes.model, modelB: bRes.model, modelC: cRes.model,
       createdAt: new Date().toISOString()
     };
     DB.results.push(result);
@@ -832,29 +829,12 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
 
   for (const lang of targetLangs) {
     console.log(`[Pipeline] Processing language: ${lang}`);
-    // 组装本语种所有行的作业，按并发度分块并行
     const rowIdxs = [];
     for (let i = 0; i < totalRows; i++) rowIdxs.push(i);
 
     for (let i = 0; i < rowIdxs.length; i += conc) {
       const chunk = rowIdxs.slice(i, i + conc);
-      const results = (await Promise.all(chunk.map(ri => processOne(ri, lang)))).filter(Boolean);
-
-      // Step 3: 每批调用模型 C 提取问题
-      if (results.length > 0) {
-        try {
-          const cResult = await modelC_extract(results);
-          cResult.needsReview.forEach(item => {
-            const result = results[item.index - 1];
-            if (result) {
-              result.needsReview = true;
-              result.reviewSeverity = item.severity;
-              result.reviewCategory = item.category;
-              result.reviewReason = item.reason;
-            }
-          });
-        } catch (e) { console.error('[Model C]', e.message); }
-      }
+      await Promise.all(chunk.map(ri => processOne(ri, lang)));
       saveDB();
       console.log(`[Pipeline] ${lang} 进度 ${Math.min(i + conc, rowIdxs.length)}/${totalRows}`);
     }
