@@ -574,7 +574,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
 // 启动翻译流水线
 app.post('/api/translate', async (req, res) => {
-  const { taskId, columnIndex, targetLangs, refColumns } = req.body;
+  const { taskId, columnIndex, targetLangs, refColumns, refTypes } = req.body;
 
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) {
@@ -590,6 +590,7 @@ app.post('/api/translate', async (req, res) => {
   task.targetLangs = targetLangs;
   task.columnIndex = columnIndex;
   task.refColumns = Array.isArray(refColumns) ? refColumns.filter(i => i !== columnIndex) : []; // 参考列（排除原文列自身）
+  task.refTypes = (refTypes && typeof refTypes === 'object') ? refTypes : {}; // {列索引: 'lang'|'scene'} 用户手选类型
   saveDB();
 
   // 异步处理翻译流水线
@@ -764,16 +765,19 @@ function isLangColumn(header) {
 }
 
 // 从参考列构建上下文文本，按「其他语言译文」与「场景/用途说明」分组，帮模型消歧
+// 类型优先用用户手选(task.refTypes)，缺省再自动判断
 function buildRefs(task, row) {
   const cols = task.refColumns || [];
   if (!cols.length) return '';
+  const types = task.refTypes || {};
   const langParts = [], sceneParts = [];
   for (const ci of cols) {
     const val = row[ci];
     if (val === undefined || val === null || String(val).trim() === '') continue;
     const header = task.headers[ci] || `列${ci + 1}`;
     const line = `${header}: ${String(val).trim()}`;
-    (isLangColumn(header) ? langParts : sceneParts).push(line);
+    const t = types[ci] || types[String(ci)] || (isLangColumn(header) ? 'lang' : 'scene');
+    (t === 'lang' ? langParts : sceneParts).push(line);
   }
   if (!langParts.length && !sceneParts.length) return '';
   let out = '\n\n参考信息（用来帮你准确理解含义与语境，但你只需翻译上面的「源内容」本身，不要翻译这些参考）：';
