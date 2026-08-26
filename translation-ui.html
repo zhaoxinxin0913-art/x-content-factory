@@ -198,6 +198,33 @@
   .switch input:checked + .slider{background:var(--brand)}
   .switch input:checked + .slider::before{transform:translateX(20px)}
   #ccFields.dim{opacity:.45;pointer-events:none}
+
+  /* 模型设置卡片 */
+  .mcard{border:1px solid var(--line);border-radius:var(--rmd);padding:18px;margin-bottom:14px;background:#fbfdfe}
+  .mcard-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .mcard-badge{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:14px}
+  .mcard-badge.A{background:#22b07d} .mcard-badge.B{background:#5b9bd5} .mcard-badge.C{background:#9b8cd0}
+  .mcard-title{font-weight:700;font-size:15px}
+  .mcard-sub{font-size:12px;color:var(--muted)}
+  .mcard-state{margin-left:auto;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px}
+  .mcard-state.on{background:var(--brand-soft);color:var(--brand-ink)}
+  .mcard-state.off{background:#f0f2f4;color:var(--muted)}
+  .mrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:600px){.mrow{grid-template-columns:1fr}}
+  .mfield label{font-size:12px;font-weight:700;color:var(--ink2);display:block;margin:8px 0 5px}
+  .mfield input,.mfield textarea{width:100%;font-family:inherit;font-size:13.5px;padding:9px 12px;
+    border:1px solid var(--line);border-radius:10px;background:#fff}
+  .mfield input:focus,.mfield textarea:focus{outline:none;border-color:var(--brand)}
+  .mfield textarea{min-height:120px;resize:vertical;line-height:1.5;font-size:13px}
+  .prompt-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 5px}
+  .prompt-head label{font-size:12px;font-weight:700;color:var(--ink2)}
+  .prompt-vars{font-size:11px;color:var(--muted)}
+  .mcard-actions{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+  .btn-mini{font-size:12.5px;padding:7px 13px;border-radius:9px;border:1px solid var(--line);
+    background:#fff;color:var(--ink2);cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+  .btn-mini:hover{border-color:var(--brand);color:var(--brand-ink)}
+  .btn-mini svg{width:14px;height:14px;stroke:currentColor;stroke-width:2;fill:none}
+  .test-out{font-size:12.5px;margin-left:4px}
 </style>
 </head>
 <body>
@@ -222,29 +249,10 @@
         <h2 style="font-size:19px;font-weight:800">模型设置</h2>
         <button class="modal-close" id="settingsClose">✕</button>
       </div>
-      <p class="hint" style="margin-bottom:18px">切换翻译与校验所用的模型，保存后立即生效、无需重启。关闭「AI 模型模式」则使用免费兜底引擎。</p>
-
-      <div class="toggle-row">
-        <div><div style="font-weight:700;font-size:15px">AI 多模型模式</div><div style="font-size:12.5px;color:var(--muted)">开启后用下方模型跑 A/B/C；关闭则用 MyMemory/Google 免费翻译 + 规则校验</div></div>
-        <label class="switch"><input type="checkbox" id="setUseCc"><span class="slider"></span></label>
-      </div>
-
-      <div id="ccFields">
-        <label class="field-label">模型代理地址 (CC-Switch / OpenAI 兼容)</label>
-        <input class="fix-input" id="setUrl" style="min-height:0" placeholder="http://127.0.0.1:15721/v1">
-        <label class="field-label">API Key</label>
-        <input class="fix-input" id="setKey" style="min-height:0" placeholder="留空则不修改" type="password">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:6px">
-          <div><label class="field-label" style="margin-top:8px">模型 A · 翻译</label><input class="fix-input" id="setA" style="min-height:0" placeholder="kimi-k2.6"></div>
-          <div><label class="field-label" style="margin-top:8px">模型 B · 校验</label><input class="fix-input" id="setB" style="min-height:0" placeholder="deepseek-chat"></div>
-          <div><label class="field-label" style="margin-top:8px">模型 C · 提取</label><input class="fix-input" id="setC" style="min-height:0" placeholder="kimi-k2.6"></div>
-        </div>
-        <button class="btn btn-ghost" id="setTest" style="margin-top:14px"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>测试连接 & 拉取可用模型</button>
-        <div id="setTestResult" style="font-size:13px;margin-top:10px;color:var(--muted)"></div>
-      </div>
-
-      <div class="footer-actions" style="margin-top:22px">
-        <button class="btn btn-primary" id="setSave"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>保存设置</button>
+      <p class="hint" style="margin-bottom:16px">A/B/C 三个模型各自独立配置接口与提示词，保存后立即生效、无需重启。<b>某个模型留空则该步用免费兜底</b>（A→MyMemory翻译，B→规则校验，C→规则提取）。</p>
+      <div id="modelCards"></div>
+      <div class="footer-actions" style="margin-top:8px;position:sticky;bottom:0;background:#fff;padding-top:12px">
+        <button class="btn btn-primary" id="setSave"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>保存全部设置</button>
         <button class="btn btn-ghost" id="setCancel">取消</button>
       </div>
     </div>
@@ -393,27 +401,59 @@ async function refreshStatus(){
     const st = await fetch('/api/status').then(r=>r.json());
     state.mode = st.mode;
     $('#statusChip').classList.add('on');
-    const m = st.models || {};
-    $('#statusText').textContent = st.mode==='cc-switch' ? `AI 模型 · ${m.A||''}` : '兜底翻译模式';
-    $('#uploadMode').innerHTML = st.mode==='cc-switch'
-      ? `⚙️ 当前：AI 多模型 — 翻译 <b>${m.A}</b> · 校验 <b>${m.B}</b> · 提取 <b>${m.C}</b>`
-      : '⚙️ 当前：兜底模式 (MyMemory/Google 翻译 + 规则校验)。点右上角「模型设置」可切换 AI 模型';
+    const m = st.models || {}, cfg = st.configured || {};
+    if(st.mode==='llm'){
+      const parts=['A','B','C'].filter(k=>cfg[k]).map(k=>`${k}:${m[k]}`);
+      $('#statusText').textContent = `大模型 · ${parts.join(' ')}`;
+      $('#uploadMode').innerHTML = `⚙️ 当前：大模型模式 — `+
+        ['A','B','C'].map(k=>cfg[k]?`${k}=<b>${m[k]}</b>`:`${k}=<span style="color:var(--muted)">兜底</span>`).join(' · ');
+    } else {
+      $('#statusText').textContent = '兜底翻译模式';
+      $('#uploadMode').innerHTML = '⚙️ 当前：兜底模式 (MyMemory/Google 翻译 + 规则校验)。点右上角「模型设置」为 A/B/C 配置大模型';
+    }
   }catch(e){ $('#statusText').textContent='服务未连接'; }
 }
 
-// ---- 模型设置 ----
+// ---- 模型设置（A/B/C 各自独立接口 + 可编辑 prompt）----
+const STEP_META = {
+  A: { title:'模型 A · 翻译生成', sub:'把原文翻译成目标语言', vars:'{targetLang} {sourceText} {glossary}' },
+  B: { title:'模型 B · 质量校验', sub:'给译文打分并指出问题', vars:'{sourceText} {translatedText} {targetLang}' },
+  C: { title:'模型 C · 问题提取', sub:'汇总低分项、生成复核建议', vars:'{reports}' }
+};
+let DEFAULT_PROMPTS = {};
 function initSettings(){
-  const modal=$('#settingsModal'), ccFields=$('#ccFields');
+  const modal=$('#settingsModal');
+  const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const cardHtml=(k,m)=>{
+    const on=!!(m.baseUrl&&m.model&&m.apiKey);
+    return `<div class="mcard" data-step="${k}">
+      <div class="mcard-head">
+        <div class="mcard-badge ${k}">${k}</div>
+        <div><div class="mcard-title">${STEP_META[k].title}</div><div class="mcard-sub">${STEP_META[k].sub}</div></div>
+        <span class="mcard-state ${on?'on':'off'}" data-role="state">${on?'已启用':'未配置→兜底'}</span>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>接口地址 (Base URL)</label><input data-f="baseUrl" placeholder="https://api.deepseek.com/v1" value="${esc(m.baseUrl)}"></div>
+        <div class="mfield"><label>模型名</label><input data-f="model" placeholder="deepseek-chat / gpt-4o / kimi-k2.6" value="${esc(m.model)}"></div>
+      </div>
+      <div class="mfield"><label>API Key</label><input data-f="apiKey" type="password" placeholder="${m.apiKey?'已设置（留空则不修改）':'sk-...'}" value=""></div>
+      <div class="prompt-head"><label>提示词 (Prompt)</label><span class="prompt-vars">可用变量: ${STEP_META[k].vars}</span></div>
+      <div class="mfield"><textarea data-f="prompt">${esc(m.prompt)}</textarea></div>
+      <div class="mcard-actions">
+        <button class="btn-mini" data-act="test"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>测试连接</button>
+        <button class="btn-mini" data-act="reset"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.4 2.6L3 8"/><path d="M3 3v5h5"/></svg>恢复默认提示词</button>
+        <span class="test-out" data-role="out"></span>
+      </div>
+    </div>`;
+  };
   const openM=async()=>{
     try{
-      const d=await fetch('/api/settings').then(r=>r.json());
-      const s=d.settings||{};
-      $('#setUseCc').checked=!!s.useCcSwitch;
-      $('#setUrl').value=s.ccSwitchUrl||'';
-      $('#setKey').value=''; $('#setKey').placeholder = s.apiKey ? '已设置（留空则不修改）' : '未设置';
-      $('#setA').value=s.modelA||''; $('#setB').value=s.modelB||''; $('#setC').value=s.modelC||'';
-      ccFields.classList.toggle('dim', !s.useCcSwitch);
-      $('#setTestResult').textContent='';
+      if(!Object.keys(DEFAULT_PROMPTS).length){
+        DEFAULT_PROMPTS=(await fetch('/api/settings/default-prompts').then(r=>r.json())).prompts||{};
+      }
+      const s=(await fetch('/api/settings').then(r=>r.json())).settings||{models:{}};
+      $('#modelCards').innerHTML=['A','B','C'].map(k=>cardHtml(k,s.models[k]||{})).join('');
+      bindCards();
       modal.classList.remove('hidden');
     }catch(e){ toast('读取设置失败','err'); }
   };
@@ -421,24 +461,41 @@ function initSettings(){
   $('#settingsBtn').onclick=openM;
   $('#settingsClose').onclick=closeM; $('#setCancel').onclick=closeM;
   modal.onclick=e=>{ if(e.target===modal) closeM(); };
-  $('#setUseCc').onchange=e=>ccFields.classList.toggle('dim', !e.target.checked);
-  $('#setTest').onclick=async()=>{
-    $('#setTestResult').innerHTML='<span class="spin"></span> 测试中…';
-    // 先临时保存 url/key 以便测试
-    await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ccSwitchUrl:$('#setUrl').value.trim(), apiKey:$('#setKey').value.trim()||undefined})});
-    try{
-      const r=await fetch('/api/settings/test').then(x=>x.json());
-      if(r.reachable){ $('#setTestResult').innerHTML=`✅ 连接成功，可用模型：<b>${(r.models||[]).slice(0,12).join(', ')||'(未返回列表)'}</b>`; }
-      else { $('#setTestResult').innerHTML=`❌ 连接失败：${r.error||'不可达'}`; }
-    }catch(e){ $('#setTestResult').textContent='❌ 测试异常：'+e.message; }
-  };
+
+  function readCard(card){
+    const g=f=>card.querySelector(`[data-f="${f}"]`).value;
+    return { baseUrl:g('baseUrl').trim(), model:g('model').trim(), apiKey:g('apiKey').trim(), prompt:g('prompt') };
+  }
+  function bindCards(){
+    document.querySelectorAll('.mcard').forEach(card=>{
+      const step=card.dataset.step;
+      card.querySelector('[data-act="reset"]').onclick=()=>{
+        card.querySelector('[data-f="prompt"]').value=DEFAULT_PROMPTS[step]||'';
+        toast(`模型${step} 提示词已恢复默认`,'ok');
+      };
+      card.querySelector('[data-act="test"]').onclick=async()=>{
+        const out=card.querySelector('[data-role="out"]');
+        const d=readCard(card);
+        if(!d.baseUrl||!d.model||(!d.apiKey)){ out.innerHTML='<span style="color:#b5722a">需填地址+模型名+Key</span>'; return; }
+        out.innerHTML='<span class="spin"></span> 测试中…';
+        try{
+          const r=await fetch('/api/settings/test',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({baseUrl:d.baseUrl,apiKey:d.apiKey,model:d.model})}).then(x=>x.json());
+          out.innerHTML = r.reachable ? '<span style="color:var(--brand-ink)">✅ 连接成功</span>' : `<span style="color:#b23c34">❌ ${esc(r.error||'不可达')}</span>`;
+        }catch(e){ out.innerHTML=`<span style="color:#b23c34">❌ ${esc(e.message)}</span>`; }
+      };
+    });
+  }
   $('#setSave').onclick=async()=>{
-    const body={ useCcSwitch:$('#setUseCc').checked, ccSwitchUrl:$('#setUrl').value.trim(),
-      modelA:$('#setA').value.trim()||undefined, modelB:$('#setB').value.trim()||undefined, modelC:$('#setC').value.trim()||undefined };
-    const k=$('#setKey').value.trim(); if(k) body.apiKey=k;
+    const models={};
+    document.querySelectorAll('.mcard').forEach(card=>{
+      const d=readCard(card);
+      const o={ baseUrl:d.baseUrl, model:d.model, prompt:d.prompt };
+      if(d.apiKey) o.apiKey=d.apiKey; // 留空不改
+      models[card.dataset.step]=o;
+    });
     try{
-      await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+      await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({models})}).then(r=>r.json());
       await refreshStatus();
       closeM(); toast('设置已保存，立即生效','ok');
     }catch(e){ toast('保存失败：'+e.message,'err'); }

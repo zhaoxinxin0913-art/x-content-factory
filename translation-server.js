@@ -9,22 +9,81 @@ const app = express();
 const PORT = 5051;
 
 // 模型配置（运行时可通过 /api/settings 修改，无需重启）
+// 三个模型各自独立：地址 + key + 模型名 + 可编辑 prompt。留空则用免费兜底引擎。
 const SETTINGS_FILE = path.join(__dirname, 'translation-settings.json');
-let SETTINGS = {
-  useCcSwitch: process.env.USE_CC_SWITCH === 'true',
-  ccSwitchUrl: process.env.CC_SWITCH_URL || 'http://127.0.0.1:15721/v1',
-  apiKey: process.env.CC_SWITCH_KEY || 'dummy',
-  modelA: process.env.MODEL_A || 'kimi-k2.6',      // 生成器（翻译）
-  modelB: process.env.MODEL_B || 'deepseek-chat',  // 校验器（质检）
-  modelC: process.env.MODEL_C || 'kimi-k2.6'       // 提取器（问题汇总）
+
+// 各步默认 prompt（前端可改，占位符会在运行时替换）
+// A 可用: {targetLang} {sourceText} {glossary}
+// B 可用: {sourceText} {translatedText} {targetLang}
+// C 可用: {reports}
+const DEFAULT_PROMPTS = {
+  A: `你是一个专业的翻译专家。
+任务：将以下内容翻译成{targetLang}。
+
+要求：
+1. 保持专业术语准确性
+2. 符合目标语言表达习惯
+3. 简洁清晰，避免冗余
+{glossary}
+
+源内容：{sourceText}
+
+请直接返回翻译结果，不要附加解释。同时评估你的翻译置信度（0-100）。
+返回 JSON 格式：
+{"translation":"翻译结果","confidence":85}`,
+  B: `你是一个严格的翻译质量校验专家。
+任务：评估以下翻译的质量。
+
+源内容（原文）：{sourceText}
+翻译结果：{translatedText}
+目标语言：{targetLang}
+
+评估维度：准确性、术语、通顺度、一致性。
+请给出：总分(1-10)、问题类型(术语错误/漏译/歧义/不通顺/过长/不当)、具体问题描述、修改建议。
+返回 JSON 格式：
+{"score":8,"issues":["术语错误"],"description":"具体问题","suggestion":"修改建议"}`,
+  C: `你是一个翻译问题汇总专家。
+以下是一批翻译校验报告（JSON 数组）：
+{reports}
+
+请提炼出需要人工复核的共性问题与改进建议。
+返回 JSON 格式：
+{"summary":"共性问题概述","suggestions":["建议1","建议2"]}`
 };
+
+function blankModel(step) {
+  return { baseUrl: '', apiKey: '', model: '', prompt: DEFAULT_PROMPTS[step], temperature: step === 'B' ? 0.2 : 0.3 };
+}
+let SETTINGS = { models: { A: blankModel('A'), B: blankModel('B'), C: blankModel('C') } };
+
+// 加载持久化设置（含旧格式迁移）
 try {
   if (require('fs').existsSync(SETTINGS_FILE)) {
-    SETTINGS = { ...SETTINGS, ...JSON.parse(require('fs').readFileSync(SETTINGS_FILE, 'utf8')) };
+    const loaded = JSON.parse(require('fs').readFileSync(SETTINGS_FILE, 'utf8'));
+    if (loaded.models) {
+      ['A', 'B', 'C'].forEach(k => { SETTINGS.models[k] = { ...blankModel(k), ...(loaded.models[k] || {}) }; });
+    }
   }
 } catch (e) { console.error('settings load failed:', e.message); }
 function saveSettings() {
   try { require('fs').writeFileSync(SETTINGS_FILE, JSON.stringify(SETTINGS, null, 2)); } catch (e) {}
+}
+
+// 工具：模型是否已配置（三项齐全才算）
+function modelConfigured(m) { return !!(m && m.baseUrl && m.apiKey && m.model); }
+// 工具：填充 prompt 占位符
+function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)); }
+// 工具：调用某个模型（OpenAI 兼容接口）
+async function callLLM(cfg, prompt) {
+  const OpenAI = require('openai');
+  const openai = new OpenAI({ baseURL: cfg.baseUrl, apiKey: cfg.apiKey });
+  const response = await openai.chat.completions.create({
+    model: cfg.model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: cfg.temperature != null ? cfg.temperature : 0.3,
+    response_format: { type: 'json_object' }
+  });
+  return JSON.parse(response.choices[0].message.content);
 }
 
 // 语种映射表（新增语种只需加一行）
@@ -185,56 +244,25 @@ function simpleQualityScore(sourceText, translatedText, targetLang) {
 // 模型 A - 生成器（翻译）
 async function modelA_generate(sourceText, targetLang, glossary = {}) {
   console.log(`[Model A] Translating: ${sourceText.substring(0, 50)}... to ${targetLang}`);
-  
-  if (SETTINGS.useCcSwitch) {
+
+  const cfg = SETTINGS.models.A;
+  if (modelConfigured(cfg)) {
     try {
-      const OpenAI = require('openai');
-      const openai = new OpenAI({
-        baseURL: SETTINGS.ccSwitchUrl,
-        apiKey: SETTINGS.apiKey
-      });
-
       const glossaryText = Object.keys(glossary).length > 0
-        ? `\n\n术语表（请严格遵守）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
+        ? `\n术语表（请严格遵守）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
         : '';
-
-      const prompt = `你是一个专业的数据库字段翻译专家。
-任务：将以下数据库字段翻译成${langName(targetLang)}。
-
-要求：
-1. 保持专业术语准确性
-2. 符合数据库字段命名习惯
-3. 简洁清晰，避免冗余
-${glossaryText}
-
-源字段：${sourceText}
-
-请直接返回翻译结果，不要附加解释。同时评估你的翻译置信度（0-100）。
-
-返回 JSON 格式：
-{
-  "translation": "翻译结果",
-  "confidence": 85
-}`;
-
-      const response = await openai.chat.completions.create({
-        model: SETTINGS.modelA,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        response_format: { type: 'json_object' }
-      });
-
-      const result = JSON.parse(response.choices[0].message.content);
+      const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText });
+      const result = await callLLM(cfg, prompt);
       return {
         translation: result.translation || sourceText,
         confidence: result.confidence || 50,
-        model: SETTINGS.modelA
+        model: cfg.model
       };
     } catch (error) {
-      console.error('[Model A] CC Switch error, fallback to Google Translate:', error.message);
+      console.error('[Model A] LLM error, fallback to free engine:', error.message);
     }
   }
-  
+
   // 兜底方案：MyMemory 优先，Google 次之
   const fb = await fallbackTranslate(sourceText, targetLang);
   const translated = fb.translation;
@@ -249,63 +277,24 @@ ${glossaryText}
 // 模型 B - 校验器（质检）
 async function modelB_validate(sourceText, translatedText, targetLang) {
   console.log(`[Model B] Validating: ${translatedText.substring(0, 50)}...`);
-  
-  if (SETTINGS.useCcSwitch) {
+
+  const cfg = SETTINGS.models.B;
+  if (modelConfigured(cfg)) {
     try {
-      const OpenAI = require('openai');
-      const openai = new OpenAI({
-        baseURL: SETTINGS.ccSwitchUrl,
-        apiKey: SETTINGS.apiKey
-      });
-
-      const prompt = `你是一个严格的翻译质量校验专家。
-
-任务：评估以下数据库字段翻译的质量。
-
-源字段（原文）：${sourceText}
-翻译结果：${translatedText}
-目标语言：${langName(targetLang)}
-
-评估维度：
-1. 准确性：是否忠实传达原意？
-2. 术语：专业术语使用是否正确？
-3. 通顺度：译文是否自然流畅？
-4. 一致性：风格是否统一？
-
-请给出：
-- 总分（1-10）
-- 问题类型（如有）：术语错误/漏译/歧义/不通顺/过长/不当
-- 具体问题描述
-- 修改建议
-
-返回 JSON 格式：
-{
-  "score": 8,
-  "issues": ["术语错误"],
-  "description": "具体问题描述",
-  "suggestion": "建议的修改方案"
-}`;
-
-      const response = await openai.chat.completions.create({
-        model: SETTINGS.modelB,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        response_format: { type: 'json_object' }
-      });
-
-      const result = JSON.parse(response.choices[0].message.content);
+      const prompt = fillPrompt(cfg.prompt, { sourceText, translatedText, targetLang: langName(targetLang) });
+      const result = await callLLM(cfg, prompt);
       return {
         score: result.score || 5,
         issues: result.issues || [],
         description: result.description || '',
         suggestion: result.suggestion || '',
-        model: SETTINGS.modelB
+        model: cfg.model
       };
     } catch (error) {
-      console.error('[Model B] CC Switch error, fallback to simple validation:', error.message);
+      console.error('[Model B] LLM error, fallback to rule validation:', error.message);
     }
   }
-  
+
   // 兜底方案：简单规则校验
   const validation = simpleQualityScore(sourceText, translatedText, targetLang);
   return {
@@ -317,8 +306,8 @@ async function modelB_validate(sourceText, translatedText, targetLang) {
 // 模型 C - 提取器（问题汇总）
 async function modelC_extract(validationReports) {
   console.log(`[Model C] Extracting issues from ${validationReports.length} reports`);
-  
-  // 简单提取逻辑：评分 ≤ 6 或有问题标签的项
+
+  // 规则提取：评分 ≤ 6 或有问题标签的项（决定哪些进人工复核队列）
   const needsReview = validationReports
     .map((r, i) => ({
       index: i + 1,
@@ -331,14 +320,26 @@ async function modelC_extract(validationReports) {
     .filter(item => item.report.validationScore <= 6 || (item.report.validationIssues && item.report.validationIssues.length > 0))
     .sort((a, b) => a.priority - b.priority);
 
+  const cfg = SETTINGS.models.C;
+  let summary = null;
+  if (modelConfigured(cfg) && needsReview.length > 0) {
+    try {
+      const reports = JSON.stringify(needsReview.map(x => ({
+        source: x.report.sourceText, translation: x.report.translation,
+        score: x.report.validationScore, issues: x.report.validationIssues
+      })));
+      const prompt = fillPrompt(cfg.prompt, { reports });
+      summary = await callLLM(cfg, prompt);
+    } catch (error) {
+      console.error('[Model C] LLM error, skip summary:', error.message);
+    }
+  }
+
   return {
     needsReview,
-    stats: {
-      total: validationReports.length,
-      issues: needsReview.length,
-      needReview: needsReview.length
-    },
-    model: SETTINGS.useCcSwitch ? SETTINGS.modelC : 'rule-based-extractor-fallback'
+    summary,
+    stats: { total: validationReports.length, issues: needsReview.length, needReview: needsReview.length },
+    model: modelConfigured(cfg) ? cfg.model : 'rule-based-extractor'
   };
 }
 
@@ -392,41 +393,68 @@ app.get('/api/background.svg', (req, res) => {
 
 // 系统状态
 app.get('/api/status', (req, res) => {
+  const m = SETTINGS.models;
+  const active = ['A', 'B', 'C'].filter(k => modelConfigured(m[k]));
   res.json({
     success: true,
-    mode: SETTINGS.useCcSwitch ? 'cc-switch' : 'fallback',
-    ccSwitchUrl: SETTINGS.ccSwitchUrl,
-    models: { A: SETTINGS.modelA, B: SETTINGS.modelB, C: SETTINGS.modelC },
-    message: SETTINGS.useCcSwitch
-      ? `AI 模型模式：A=${SETTINGS.modelA} · B=${SETTINGS.modelB} · C=${SETTINGS.modelC}`
-      : '兜底模式：MyMemory/Google 翻译 + 规则校验'
+    mode: active.length > 0 ? 'llm' : 'fallback',
+    models: { A: m.A.model || '', B: m.B.model || '', C: m.C.model || '' },
+    configured: { A: modelConfigured(m.A), B: modelConfigured(m.B), C: modelConfigured(m.C) },
+    message: active.length > 0
+      ? `大模型模式（已配置 ${active.join('/')}）`
+      : '兜底模式：MyMemory/Google 翻译 + 规则校验（未配置任何大模型）'
   });
 });
 
-// 读取/保存模型设置（运行时切换模型，无需重启）
-app.get('/api/settings', (req, res) => {
-  res.json({ success: true, settings: { ...SETTINGS, apiKey: SETTINGS.apiKey ? '••••••' : '' } });
-});
-app.post('/api/settings', (req, res) => {
-  const { useCcSwitch, ccSwitchUrl, apiKey, modelA, modelB, modelC } = req.body || {};
-  if (typeof useCcSwitch === 'boolean') SETTINGS.useCcSwitch = useCcSwitch;
-  if (ccSwitchUrl) SETTINGS.ccSwitchUrl = ccSwitchUrl;
-  if (apiKey && apiKey !== '••••••') SETTINGS.apiKey = apiKey;
-  if (modelA) SETTINGS.modelA = modelA;
-  if (modelB) SETTINGS.modelB = modelB;
-  if (modelC) SETTINGS.modelC = modelC;
-  saveSettings();
-  res.json({ success: true, settings: { ...SETTINGS, apiKey: SETTINGS.apiKey ? '••••••' : '' } });
+// 脱敏输出（apiKey 不回传明文）
+function maskedSettings() {
+  const out = { models: {} };
+  ['A', 'B', 'C'].forEach(k => {
+    const m = SETTINGS.models[k];
+    out.models[k] = { baseUrl: m.baseUrl || '', apiKey: m.apiKey ? '••••••' : '', model: m.model || '', prompt: m.prompt || '', temperature: m.temperature };
+  });
+  return out;
+}
+
+// 读取默认 prompt（供前端“恢复默认”）
+app.get('/api/settings/default-prompts', (req, res) => {
+  res.json({ success: true, prompts: DEFAULT_PROMPTS });
 });
 
-// 测试 CC-Switch 连通性 + 可用模型
-app.get('/api/settings/test', async (req, res) => {
+// 读取/保存模型设置（运行时切换，无需重启）
+app.get('/api/settings', (req, res) => {
+  res.json({ success: true, settings: maskedSettings() });
+});
+app.post('/api/settings', (req, res) => {
+  const body = req.body || {};
+  const models = body.models || {};
+  ['A', 'B', 'C'].forEach(k => {
+    const inc = models[k];
+    if (!inc) return;
+    const cur = SETTINGS.models[k];
+    if (typeof inc.baseUrl === 'string') cur.baseUrl = inc.baseUrl.trim();
+    if (typeof inc.model === 'string') cur.model = inc.model.trim();
+    if (typeof inc.prompt === 'string' && inc.prompt.length) cur.prompt = inc.prompt;
+    if (inc.temperature != null && !isNaN(inc.temperature)) cur.temperature = Number(inc.temperature);
+    // apiKey：留空或占位符则不改，否则覆盖
+    if (typeof inc.apiKey === 'string' && inc.apiKey && inc.apiKey !== '••••••') cur.apiKey = inc.apiKey.trim();
+  });
+  saveSettings();
+  res.json({ success: true, settings: maskedSettings() });
+});
+
+// 测试某个模型连通性（body: {step:'A'|'B'|'C'} 或直接 {baseUrl,apiKey,model}）
+app.post('/api/settings/test', async (req, res) => {
+  const b = req.body || {};
+  let cfg;
+  if (b.step && SETTINGS.models[b.step]) cfg = SETTINGS.models[b.step];
+  else cfg = { baseUrl: b.baseUrl, apiKey: (b.apiKey && b.apiKey !== '••••••') ? b.apiKey : (SETTINGS.models[b.step] && SETTINGS.models[b.step].apiKey), model: b.model };
+  if (!cfg.baseUrl || !cfg.apiKey || !cfg.model) {
+    return res.json({ success: true, reachable: false, error: '缺少地址/Key/模型名' });
+  }
   try {
-    const OpenAI = require('openai');
-    const openai = new OpenAI({ baseURL: SETTINGS.ccSwitchUrl, apiKey: SETTINGS.apiKey });
-    const r = await openai.models.list();
-    const ids = (r.data || []).map(m => m.id);
-    res.json({ success: true, reachable: true, models: ids });
+    const r = await callLLM(cfg, '请回复 JSON：{"ok":true}');
+    res.json({ success: true, reachable: true, sample: r });
   } catch (e) {
     res.json({ success: true, reachable: false, error: e.message });
   }
@@ -656,7 +684,8 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) return;
 
-  console.log(`[Pipeline] Starting task ${taskId} (${SETTINGS.useCcSwitch ? 'CC Switch' : 'Fallback'} mode)`);
+  const anyLLM = ['A', 'B', 'C'].some(k => modelConfigured(SETTINGS.models[k]));
+  console.log(`[Pipeline] Starting task ${taskId} (${anyLLM ? 'LLM' : 'Fallback'} mode)`);
 
   const batchSize = 5; // 每批处理 5 条
   const totalRows = task.data.length;
@@ -711,7 +740,8 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
         validationReports.push(result);
 
         // 节流（兜底 MyMemory/Google 免费接口有频率限制，放慢一点更稳）
-        await new Promise(resolve => setTimeout(resolve, SETTINGS.useCcSwitch ? 500 : 350));
+        // 节流（LLM 慢、免费接口有频率限制）
+        await new Promise(resolve => setTimeout(resolve, anyLLM ? 500 : 350));
       }
 
       // Step 3: 每批次调用模型 C 提取问题
@@ -750,17 +780,19 @@ app.listen(PORT, () => {
   console.log('🌍 AI 翻译流水线平台启动成功！');
   console.log('================================');
   console.log(`📍 访问地址: http://localhost:${PORT}`);
-  console.log(`🤖 运行模式: ${SETTINGS.useCcSwitch ? 'CC Switch (' + SETTINGS.modelA + '/' + SETTINGS.modelB + ')' : 'Fallback (MyMemory/Google + 规则校验)'}`);
-  if (SETTINGS.useCcSwitch) {
-    console.log(`🔗 模型代理: ${SETTINGS.ccSwitchUrl}`);
-  }
+  const anyLLM = ['A', 'B', 'C'].some(k => modelConfigured(SETTINGS.models[k]));
+  console.log(`🤖 运行模式: ${anyLLM ? '大模型模式' : 'Fallback (MyMemory/Google + 规则校验)'}`);
+  ['A', 'B', 'C'].forEach(k => {
+    const m = SETTINGS.models[k];
+    if (modelConfigured(m)) console.log(`   模型 ${k}: ${m.model} @ ${m.baseUrl}`);
+  });
   console.log(`📁 上传目录: ${UPLOAD_DIR}`);
   console.log(`📤 导出目录: ${OUTPUT_DIR}`);
   console.log(`💾 数据库: ${DB_FILE}`);
   console.log('================================');
   console.log('');
-  if (!SETTINGS.useCcSwitch) {
-    console.log('💡 提示：当前兜底模式。在网站右上角「模型设置」可切换到 AI 多模型模式。');
+  if (!anyLLM) {
+    console.log('💡 提示：当前兜底模式。在网站右上角「模型设置」为 A/B/C 各填地址+Key+模型名即可切换大模型。');
     console.log('');
   }
 });
