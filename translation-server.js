@@ -97,28 +97,31 @@ async function callOpenAI(cfg, prompt, temp) {
 async function callAnthropic(cfg, prompt, temp) {
   const base = String(cfg.baseUrl || '').replace(/\/+$/, '');
   const url = /\/v1$/.test(base) ? `${base}/messages` : `${base}/v1/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': cfg.apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      max_tokens: 1024,
-      temperature: temp,
-      messages: [{ role: 'user', content: prompt + '\n\n只返回 JSON，不要任何额外解释或 markdown 代码块。' }]
-    })
-  });
+  const body = {
+    model: cfg.model,
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt + '\n\n只返回 JSON，不要任何额外解释或 markdown 代码块。' }]
+  };
+  // 部分新模型（如 claude-sonnet-5）弃用 temperature，仅在明确 <1 时发送，出错则自动重试不带该参数
+  const send = async (withTemp) => {
+    const payload = withTemp ? { ...body, temperature: temp } : body;
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify(payload)
+    });
+  };
+  let res = await send(temp != null && temp < 1);
+  if (res.status === 400) {
+    const t = await res.clone().text();
+    if (/temperature/i.test(t)) res = await send(false); // temperature 被弃用则重试
+  }
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
   }
   const data = await res.json();
-  // Anthropic 返回 content: [{type:'text', text:'...'}]
   let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
-  // 去除可能的 ```json ``` 包裹
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   return JSON.parse(text);
 }
