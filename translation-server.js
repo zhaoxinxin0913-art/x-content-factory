@@ -13,8 +13,8 @@ const PORT = 5051;
 const SETTINGS_FILE = path.join(__dirname, 'translation-settings.json');
 
 // 各步默认 prompt（前端可改，占位符会在运行时替换）
-// A 可用: {targetLang} {sourceText} {glossary}
-// B 可用: {sourceText} {translatedText} {targetLang}
+// A 可用: {targetLang} {sourceText} {glossary} {refs}
+// B 可用: {sourceText} {translatedText} {targetLang} {refs}
 // C 可用: {reports}
 const DEFAULT_PROMPTS = {
   A: `你是一个专业的翻译专家。
@@ -24,7 +24,7 @@ const DEFAULT_PROMPTS = {
 1. 保持专业术语准确性
 2. 符合目标语言表达习惯
 3. 简洁清晰，避免冗余
-{glossary}
+{glossary}{refs}
 
 源内容：{sourceText}
 
@@ -36,7 +36,7 @@ const DEFAULT_PROMPTS = {
 
 源内容（原文）：{sourceText}
 翻译结果：{translatedText}
-目标语言：{targetLang}
+目标语言：{targetLang}{refs}
 
 评估维度：准确性、术语、通顺度、一致性。
 请给出：总分(1-10)、问题类型(术语错误/漏译/歧义/不通顺/过长/不当)、具体问题描述、修改建议。
@@ -315,7 +315,7 @@ function simpleQualityScore(sourceText, translatedText, targetLang) {
 // ============================================================
 
 // 模型 A - 生成器（翻译）
-async function modelA_generate(sourceText, targetLang, glossary = {}) {
+async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '') {
   console.log(`[Model A] Translating: ${sourceText.substring(0, 50)}... to ${targetLang}`);
 
   const cfg = SETTINGS.models.A;
@@ -324,7 +324,7 @@ async function modelA_generate(sourceText, targetLang, glossary = {}) {
       const glossaryText = Object.keys(glossary).length > 0
         ? `\n术语表（请严格遵守）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
         : '';
-      const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText });
+      const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
       return {
         translation: result.translation || sourceText,
@@ -348,13 +348,13 @@ async function modelA_generate(sourceText, targetLang, glossary = {}) {
 }
 
 // 模型 B - 校验器（质检）
-async function modelB_validate(sourceText, translatedText, targetLang) {
+async function modelB_validate(sourceText, translatedText, targetLang, refs = '') {
   console.log(`[Model B] Validating: ${translatedText.substring(0, 50)}...`);
 
   const cfg = SETTINGS.models.B;
   if (modelConfigured(cfg)) {
     try {
-      const prompt = fillPrompt(cfg.prompt, { sourceText, translatedText, targetLang: langName(targetLang) });
+      const prompt = fillPrompt(cfg.prompt, { sourceText, translatedText, targetLang: langName(targetLang), refs: refs || '' });
       const result = await callLLM(cfg, prompt);
       return {
         score: result.score || 5,
@@ -593,7 +593,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
 // 启动翻译流水线
 app.post('/api/translate', async (req, res) => {
-  const { taskId, columnIndex, targetLangs } = req.body;
+  const { taskId, columnIndex, targetLangs, refColumns } = req.body;
 
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) {
@@ -608,6 +608,7 @@ app.post('/api/translate', async (req, res) => {
   task.status = 'translating';
   task.targetLangs = targetLangs;
   task.columnIndex = columnIndex;
+  task.refColumns = Array.isArray(refColumns) ? refColumns.filter(i => i !== columnIndex) : []; // 参考列（排除原文列自身）
   saveDB();
 
   // 异步处理翻译流水线
@@ -759,89 +760,90 @@ app.get('/api/training-samples', (req, res) => {
 // 翻译流水线核心逻辑
 // ============================================================
 
+// 并发度：大模型可并行请求，兜底免费接口易被限流故保守
+const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '6', 10);
+
+// 从参考列构建上下文文本（同一字段的其他语言已有译文，帮助模型消歧）
+function buildRefs(task, row) {
+  const cols = task.refColumns || [];
+  if (!cols.length) return '';
+  const parts = [];
+  for (const ci of cols) {
+    const val = row[ci];
+    if (val === undefined || val === null || String(val).trim() === '') continue;
+    const header = task.headers[ci] || `列${ci + 1}`;
+    parts.push(`${header}: ${String(val).trim()}`);
+  }
+  if (!parts.length) return '';
+  return `\n\n参考（同一字段在其他语言/列的已有内容，帮助你准确理解含义，但只翻译上面的源内容）：\n${parts.join('\n')}`;
+}
+
 async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) return;
 
   const anyLLM = ['A', 'B', 'C'].some(k => modelConfigured(SETTINGS.models[k]));
-  console.log(`[Pipeline] Starting task ${taskId} (${anyLLM ? 'LLM' : 'Fallback'} mode)`);
+  const conc = anyLLM ? CONCURRENCY : 2; // 免费兜底并发度压低防限流
+  console.log(`[Pipeline] Starting task ${taskId} (${anyLLM ? 'LLM' : 'Fallback'} mode, 并发=${conc}, 参考列=${(task.refColumns || []).length})`);
 
-  const batchSize = 5; // 每批处理 5 条
   const totalRows = task.data.length;
 
-  for (let lang of targetLangs) {
+  // 处理单条 (rowIndex, lang) 作业
+  async function processOne(rowIndex, lang) {
+    const raw = task.data[rowIndex][columnIndex];
+    if (raw === undefined || raw === null || String(raw) === '') return null;
+    const sourceText = String(raw);
+    const refs = buildRefs(task, task.data[rowIndex]);
+
+    let aResult, bResult;
+    try {
+      aResult = await modelA_generate(sourceText, lang, DB.glossary, refs);
+      bResult = await modelB_validate(sourceText, aResult.translation, lang, refs);
+    } catch (err) {
+      console.error(`[Pipeline] Row ${rowIndex + 1}/${lang} 失败: ${err.message}`);
+      aResult = { translation: sourceText, confidence: 0, model: 'error' };
+      bResult = { score: 1, issues: ['处理异常'], description: err.message, suggestion: '需人工复核', model: 'error' };
+    }
+    const result = {
+      id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      taskId, rowIndex, sourceText, targetLang: lang,
+      translation: aResult.translation, confidence: aResult.confidence,
+      validationScore: bResult.score, validationIssues: bResult.issues,
+      validationDescription: bResult.description, validationSuggestion: bResult.suggestion,
+      modelA: aResult.model, modelB: bResult.model,
+      createdAt: new Date().toISOString()
+    };
+    DB.results.push(result);
+    return result;
+  }
+
+  for (const lang of targetLangs) {
     console.log(`[Pipeline] Processing language: ${lang}`);
+    // 组装本语种所有行的作业，按并发度分块并行
+    const rowIdxs = [];
+    for (let i = 0; i < totalRows; i++) rowIdxs.push(i);
 
-    for (let i = 0; i < totalRows; i += batchSize) {
-      const batch = task.data.slice(i, Math.min(i + batchSize, totalRows));
-      const validationReports = [];
+    for (let i = 0; i < rowIdxs.length; i += conc) {
+      const chunk = rowIdxs.slice(i, i + conc);
+      const results = (await Promise.all(chunk.map(ri => processOne(ri, lang)))).filter(Boolean);
 
-      for (let j = 0; j < batch.length; j++) {
-        const rowIndex = i + j;
-        const raw = batch[j][columnIndex];
-        if (raw === undefined || raw === null || raw === '') continue;
-        const sourceText = String(raw); // 单元格可能是数字/日期，统一转字符串
-
-        console.log(`[Pipeline] Row ${rowIndex + 1}/${totalRows} - ${sourceText.substring(0, 50)}...`);
-
-        let aResult, bResult;
+      // Step 3: 每批调用模型 C 提取问题
+      if (results.length > 0) {
         try {
-          // Step 1: 模型 A 生成翻译
-          aResult = await modelA_generate(sourceText, lang, DB.glossary);
-          // Step 2: 模型 B 校验
-          bResult = await modelB_validate(sourceText, aResult.translation, lang);
-        } catch (err) {
-          // 单条失败不阻断整个任务
-          console.error(`[Pipeline] Row ${rowIndex + 1} 处理失败: ${err.message}`);
-          aResult = { translation: sourceText, confidence: 0, model: 'error' };
-          bResult = { score: 1, issues: ['处理异常'], description: err.message, suggestion: '需人工复核', model: 'error' };
-        }
-
-        // 保存结果
-        const result = {
-          id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          taskId,
-          rowIndex,
-          sourceText,
-          targetLang: lang,
-          translation: aResult.translation,
-          confidence: aResult.confidence,
-          validationScore: bResult.score,
-          validationIssues: bResult.issues,
-          validationDescription: bResult.description,
-          validationSuggestion: bResult.suggestion,
-          modelA: aResult.model,
-          modelB: bResult.model,
-          createdAt: new Date().toISOString()
-        };
-
-        DB.results.push(result);
-        validationReports.push(result);
-
-        // 节流（兜底 MyMemory/Google 免费接口有频率限制，放慢一点更稳）
-        // 节流（LLM 慢、免费接口有频率限制）
-        await new Promise(resolve => setTimeout(resolve, anyLLM ? 500 : 350));
+          const cResult = await modelC_extract(results);
+          cResult.needsReview.forEach(item => {
+            const result = results[item.index - 1];
+            if (result) {
+              result.needsReview = true;
+              result.reviewSeverity = item.severity;
+              result.reviewCategory = item.category;
+              result.reviewReason = item.reason;
+            }
+          });
+        } catch (e) { console.error('[Model C]', e.message); }
       }
-
-      // Step 3: 每批次调用模型 C 提取问题
-      if (validationReports.length > 0) {
-        console.log(`[Pipeline] Model C extracting issues for batch ${Math.floor(i / batchSize) + 1}`);
-        const cResult = await modelC_extract(validationReports);
-
-        // 标记需要复核的项
-        cResult.needsReview.forEach(item => {
-          const result = validationReports[item.index - 1];
-          if (result) {
-            result.needsReview = true;
-            result.reviewSeverity = item.severity;
-            result.reviewCategory = item.category;
-            result.reviewReason = item.reason;
-          }
-        });
-      }
-
       saveDB();
-      console.log(`[Pipeline] Batch ${Math.floor(i / batchSize) + 1} completed`);
+      console.log(`[Pipeline] ${lang} 进度 ${Math.min(i + conc, rowIdxs.length)}/${totalRows}`);
     }
   }
 

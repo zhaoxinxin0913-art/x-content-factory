@@ -198,6 +198,9 @@
   .switch input:checked + .slider{background:var(--brand)}
   .switch input:checked + .slider::before{transform:translateX(20px)}
   #ccFields.dim{opacity:.45;pointer-events:none}
+  .note{background:linear-gradient(160deg,var(--brand-soft),#fff);border:1px solid #d0ecdf;
+    border-left:4px solid var(--brand);border-radius:12px;padding:11px 15px;color:var(--brand-ink);font-size:14px}
+  .note b{color:var(--brand-ink);font-weight:800}
 
   /* 模型设置卡片 */
   .mcard{border:1px solid var(--line);border-radius:var(--rmd);padding:18px;margin-bottom:14px;background:#fbfdfe}
@@ -298,9 +301,13 @@
     <div class="card">
       <h2><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>待翻译列</h2>
       <div class="hint">选择包含原文的列，下方为前 5 行预览。</div>
-      <label class="field-label">原文列</label>
+      <label class="field-label">原文列（选择要翻译的列）</label>
       <select id="colSelect"></select>
+      <div id="colHint" class="note" style="margin-top:10px"></div>
       <div class="tbl-wrap" id="previewWrap"></div>
+      <label class="field-label" style="margin-top:18px">参考列（可选，多选）</label>
+      <div class="hint" style="margin-top:0">勾选同一字段的其他语言列作为参考，帮助模型准确理解含义、提升翻译准确度。不增加翻译耗时。</div>
+      <div class="lang-grid" id="refGrid" style="margin-top:8px"></div>
     </div>
     <div class="card">
       <h2><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg>目标语种</h2>
@@ -378,7 +385,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let state = { taskId:null, headers:[], preview:[], rowCount:0, colIndex:0, langs:[], selectedLangs:[], mode:'fallback', results:[], reviews:[], samples:0, pollTimer:null };
+let state = { taskId:null, headers:[], preview:[], rowCount:0, colIndex:0, refColumns:[], langs:[], selectedLangs:[], mode:'fallback', results:[], reviews:[], samples:0, pollTimer:null };
 
 function toast(msg, type){ const t=$('#toast'); t.textContent=msg; t.className='toast show '+(type||''); setTimeout(()=>t.className='toast',2600); }
 function showView(n){ for(let i=1;i<=5;i++){ $('#view'+i).classList.toggle('hidden', i!==n); }
@@ -552,16 +559,51 @@ async function handleFile(file){
   finally{ drop.querySelector('.big').textContent='拖拽文件到此处，或点击选择'; }
 }
 function buildColSelect(){
-  $('#colSelect').innerHTML = state.headers.map((h,i)=>`<option value="${i}">${h||('列 '+(i+1))}</option>`).join('');
-  $('#colSelect').onchange=e=>{ state.colIndex=+e.target.value; buildPreview(); };
+  const rows=state.preview||[];
+  const sample=i=>{ for(const r of rows){ if(r[i]!=null&&String(r[i]).trim()!=='') return String(r[i]); } return ''; };
+  $('#colSelect').innerHTML = state.headers.map((h,i)=>{
+    const ex=sample(i); const exTxt=ex?`  ——  例: ${ex.slice(0,30)}${ex.length>30?'…':''}`:'  (空列)';
+    return `<option value="${i}">${h||('列 '+(i+1))}${exTxt}</option>`;
+  }).join('');
+  $('#colSelect').onchange=e=>{ state.colIndex=+e.target.value; state.refColumns=state.refColumns.filter(i=>i!==state.colIndex); buildPreview(); updateColHint(); renderRefGrid(); };
   state.colIndex=0;
+  updateColHint();
+  renderRefGrid();
+}
+function renderRefGrid(){
+  const rows=state.preview||[];
+  const sample=i=>{ for(const r of rows){ if(r[i]!=null&&String(r[i]).trim()!=='') return String(r[i]); } return ''; };
+  $('#refGrid').innerHTML = state.headers.map((h,i)=>{
+    if(i===state.colIndex) return ''; // 原文列自身不作参考
+    const ex=sample(i); const sel=state.refColumns.includes(i);
+    return `<div class="lang-chip ${sel?'sel':''}" data-ref="${i}">
+      <span>${h||('列'+(i+1))}</span>${ex?`<span style="color:var(--muted);font-size:12px">${esc(ex.slice(0,16))}</span>`:''}<span class="ck"></span>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('#refGrid .lang-chip').forEach(c=>{
+    c.onclick=()=>{ const i=+c.dataset.ref; c.classList.toggle('sel');
+      if(c.classList.contains('sel')){ if(!state.refColumns.includes(i)) state.refColumns.push(i); }
+      else state.refColumns=state.refColumns.filter(x=>x!==i);
+    };
+  });
+}
+function updateColHint(){
+  const h=state.headers[state.colIndex];
+  const rows=state.preview||[];
+  let ex=''; for(const r of rows){ if(r[state.colIndex]!=null&&String(r[state.colIndex]).trim()!==''){ ex=String(r[state.colIndex]); break; } }
+  $('#colHint').innerHTML=`将翻译第 <b>${state.colIndex+1}</b> 列「<b>${h||('列'+(state.colIndex+1))}</b>」`+(ex?`，例如：<b>${esc(ex.slice(0,40))}</b>`:'');
 }
 function buildPreview(){
   const rows=state.preview||[];
-  let html='<table><thead><tr>'+state.headers.map((h,i)=>`<th style="${i==state.colIndex?'color:var(--brand-ink);background:var(--brand-soft)':''}">${h||('列'+(i+1))}</th>`).join('')+'</tr></thead><tbody>';
-  html+=rows.map(r=>'<tr>'+state.headers.map((h,i)=>`<td class="trunc" style="${i==state.colIndex?'font-weight:700;color:var(--brand-ink)':''}">${r[i]!=null?r[i]:''}</td>`).join('')+'</tr>').join('');
-  html+='</tbody></table>';
-  $('#previewWrap').innerHTML=html;
+  const th=state.headers.map((h,i)=>{
+    const on=i==state.colIndex;
+    return `<th style="${on?'color:#fff;background:var(--brand)':''}">${on?'✓ ':''}${h||('列'+(i+1))}${on?' (翻译此列)':''}</th>`;
+  }).join('');
+  const body=rows.map(r=>'<tr>'+state.headers.map((h,i)=>{
+    const on=i==state.colIndex;
+    return `<td class="trunc" style="${on?'font-weight:700;color:var(--brand-ink);background:var(--brand-soft)':''}">${r[i]!=null?esc(String(r[i])):''}</td>`;
+  }).join('')+'</tr>').join('');
+  $('#previewWrap').innerHTML=`<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
 }
 $('#backTo1').onclick=()=>showView(1);
 $('#restartBtn').onclick=()=>{ location.reload(); };
@@ -571,7 +613,7 @@ $('#startBtn').onclick=async()=>{
   if(!state.selectedLangs.length){ toast('请至少选择一个语种','err'); return; }
   try{
     await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({taskId:state.taskId,columnIndex:state.colIndex,targetLangs:state.selectedLangs})}).then(r=>r.json());
+      body:JSON.stringify({taskId:state.taskId,columnIndex:state.colIndex,targetLangs:state.selectedLangs,refColumns:state.refColumns})}).then(r=>r.json());
     $('#stLang').textContent=state.selectedLangs.length;
     showView(3); startPolling();
   }catch(e){ toast('启动失败：'+e.message,'err'); }
