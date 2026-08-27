@@ -923,18 +923,18 @@ function classifyRoute(cRes, progCheck) {
 
   // 人工复审（任一命中）
   if (!progCheck.pass) return 'human';                       // 程序检查未过 → 一票否决进人工
-  if (score < 85) return 'human';
+  if (score < 70) return 'human';                            // 阈值放宽: <70 才必须人工(原<85)
   if (d.needs_human_review === true) return 'human';
   if (risk === 'high') return 'human';
   if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
   if (decision === 'human_review') return 'human';
-  // 运营抽查
-  if (score >= 85 && score <= 89) return 'spot_check';
+  // 运营抽查: 70-84 分 / medium风险 / rewrite
+  if (score >= 70 && score <= 84) return 'spot_check';
   if (risk === 'medium') return 'spot_check';
   if (decision === 'rewrite') return 'spot_check';
-  // 自动通过：score>=90 且 auto_approve 且 检查通过 且 low risk
-  if (score >= 90 && d.auto_approve === true && checksPass && risk === 'low') return 'auto';
-  // 兜底：score 90+ 但缺 auto_approve 信号（如兜底/简版C输出）→ 抽查
+  // 自动通过：score>=85 且 auto_approve 且 检查通过 且 low risk (原>=90)
+  if (score >= 85 && d.auto_approve === true && checksPass && risk === 'low') return 'auto';
+  // 兜底：score 85+ 但缺 auto_approve 信号（如兜底/简版C输出）→ 抽查
   return 'spot_check';
 }
 
