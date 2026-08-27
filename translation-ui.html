@@ -337,9 +337,9 @@
       <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
       <div class="stat-row">
         <div class="stat"><div class="v" id="stDone">0</div><div class="l">已完成</div></div>
-        <div class="stat"><div class="v" id="stTotal">0</div><div class="l">总条目</div></div>
-        <div class="stat"><div class="v" id="stReview">0</div><div class="l">待复核</div></div>
-        <div class="stat"><div class="v" id="stLang">0</div><div class="l">语种数</div></div>
+        <div class="stat"><div class="v" id="stAuto" style="color:#1f9d57">0</div><div class="l">✅ 自动通过</div></div>
+        <div class="stat"><div class="v" id="stSpot" style="color:#c98a1e">0</div><div class="l">🔍 运营抽查</div></div>
+        <div class="stat"><div class="v" id="stReview" style="color:#d14343">0</div><div class="l">👤 人工复审</div></div>
       </div>
       <div class="footer-actions" style="margin-top:20px">
         <button class="btn btn-primary hidden" id="toReviewBtn"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>进入人工复核</button>
@@ -664,8 +664,9 @@ async function poll(){
     $('#progPct').textContent=p.percent+'%';
     $('#progFill').style.width=p.percent+'%';
     $('#stDone').textContent=p.done;
-    $('#stTotal').textContent=p.expectedTotal;
-    $('#stReview').textContent=p.needsReviewCount;
+    $('#stAuto').textContent=p.autoCount||0;
+    $('#stSpot').textContent=p.spotCount||0;
+    $('#stReview').textContent=p.humanCount!=null?p.humanCount:p.needsReviewCount;
     if(res.task.status==='completed'){
       clearInterval(state.pollTimer);
       $('#progSpin').innerHTML='<svg class="ic-sm" style="stroke:var(--brand)" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg> 全部完成';

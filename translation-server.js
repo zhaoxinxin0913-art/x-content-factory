@@ -649,6 +649,10 @@ app.get('/api/task/:taskId', (req, res) => {
   const done = results.length;
   const needsReviewCount = results.filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id)).length;
   const reviewedCount = reviews.length;
+  // 三档分流统计
+  const autoCount = results.filter(r => r.route === 'auto').length;
+  const spotCount = results.filter(r => r.route === 'spot_check').length;
+  const humanCount = results.filter(r => r.route === 'human').length;
 
   res.json({
     success: true,
@@ -661,7 +665,10 @@ app.get('/api/task/:taskId', (req, res) => {
       expectedTotal,
       percent: expectedTotal > 0 ? Math.round(done / expectedTotal * 100) : (task.status === 'completed' ? 100 : 0),
       needsReviewCount,
-      reviewedCount
+      reviewedCount,
+      autoCount,        // 自动通过
+      spotCount,        // 运营抽查
+      humanCount        // 人工复审
     }
   });
 });
@@ -793,9 +800,11 @@ app.get('/api/export-review/:taskId', (req, res) => {
     .map(r => {
       const ref = refCells(r.rowIndex);
       const d = r.cDetail || {};
+      const routeName = { human: '人工复审', spot_check: '运营抽查', auto: '自动通过' };
       return {
         '原文': r.sourceText,
         '目标语言': langName(r.targetLang),
+        '分流': routeName[r.route] || (r.needsReview ? '需复核' : '通过'),
         '参考语种译文': ref.langs,
         '参考场景说明': ref.scenes,
         '译文A': r.translationA || '',
@@ -804,9 +813,10 @@ app.get('/api/export-review/:taskId', (req, res) => {
         'C裁决': d.decision || (r.chosen === 'merged' ? '融合' : ('译文' + (r.chosen || ''))),
         'C总评分': (typeof d.overall_score === 'number' ? d.overall_score : ''),
         '风险等级': d.risk_level || (sevName[r.reviewSeverity] || '需复核'),
+        '程序检查': Array.isArray(r.programChecks) && r.programChecks.length ? '❌ ' + r.programChecks.join('; ') : '✓ 通过',
         '一致性评分': r.consistency,
         '问题类型': Array.isArray(d.error_types) ? d.error_types.join('; ') : '',
-        '复核原因': d.review_reason || r.divergence || '',
+        '复核原因': d.review_reason || r.divergence || r.reviewReason || '',
         '需补充语境': d.context_needed || '',
         '人工修正译文': ''  // 留空列，供同事填写
       };
@@ -861,6 +871,70 @@ app.get('/api/training-samples', (req, res) => {
 
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
 const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '6', 10);
+
+// ---- 确定性程序检查（优先级高于模型评分：即使C给98分，%s数量错也拦截）----
+function programChecks(sourceText, finalText, glossary = {}) {
+  const src = String(sourceText || ''), out = String(finalText || '');
+  const issues = [];
+  // 1. 译文非空
+  if (!out.trim()) issues.push('译文为空');
+  // 2. 占位符集合一致（%s %d %1$s {name} {{var}}）
+  const phRe = /%\d*\$?[sd]|\{\{?\w+\}?\}/g;
+  const norm = arr => (arr || []).map(x => x.replace(/^\{+|\}+$/g, '')).sort().join(',');
+  const srcPh = src.match(phRe) || [], outPh = out.match(phRe) || [];
+  if (srcPh.length !== outPh.length) issues.push(`占位符数量不符(原文${srcPh.length}/译文${outPh.length})`);
+  else if (norm(srcPh) !== norm(outPh)) issues.push('占位符类型/名称不一致');
+  // 3. HTML/XML 标签集合一致
+  const tagRe = /<\/?[a-zA-Z][^>]*>/g;
+  const srcTags = (src.match(tagRe) || []).sort().join(''), outTags = (out.match(tagRe) || []).sort().join('');
+  if (srcTags !== outTags) issues.push('HTML标签不一致');
+  // 4. URL 未改变
+  const urlRe = /https?:\/\/[^\s"'<>]+/g;
+  const srcUrls = (src.match(urlRe) || []).sort().join(' '), outUrls = (out.match(urlRe) || []).sort().join(' ');
+  if (srcUrls !== outUrls) issues.push('URL被改动');
+  // 5. 数字/金额集合一致（防金额/数量被改）
+  const numRe = /\d[\d,.]*/g;
+  const srcNums = (src.match(numRe) || []).map(x => x.replace(/[,]/g, '')).sort().join(','),
+        outNums = (out.match(numRe) || []).map(x => x.replace(/[,]/g, '')).sort().join(',');
+  if (srcNums !== outNums) issues.push('数字/金额不一致');
+  // 6. 强制术语命中（原文含术语key，译文须含对应译法）
+  for (const [k, v] of Object.entries(glossary || {})) {
+    if (src.includes(k) && v && !out.includes(v)) issues.push(`术语未命中: ${k}→${v}`);
+  }
+  // 7. 译文疑似仍是英文/未翻译（目标非英文时，译文与原文完全相同且含大量ASCII字母）
+  if (out.trim() && out.trim() === src.trim() && /[a-zA-Z]{3,}/.test(out) && !/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(out)) {
+    // 仅当原文本身是英文时可疑（纯符号/数字不算）
+    if (/[a-zA-Z]/.test(src)) issues.push('译文疑似未翻译(与原文相同)');
+  }
+  return { pass: issues.length === 0, issues };
+}
+
+// ---- 三档自动分流（程序检查一票否决，优先于模型评分）----
+// 返回 'auto'(自动通过) | 'spot_check'(运营抽查) | 'human'(人工复审)
+function classifyRoute(cRes, progCheck) {
+  const d = (cRes && cRes.detail) || {};
+  const score = typeof d.overall_score === 'number' ? d.overall_score : (cRes.consistency * 10);
+  const risk = d.risk_level || 'low';
+  const decision = d.decision || '';
+  const checksPass = progCheck.pass
+    && d.placeholder_check !== 'fail' && d.terminology_check !== 'fail' && d.locale_check !== 'fail';
+
+  // 人工复审（任一命中）
+  if (!progCheck.pass) return 'human';                       // 程序检查未过 → 一票否决进人工
+  if (score < 85) return 'human';
+  if (d.needs_human_review === true) return 'human';
+  if (risk === 'high') return 'human';
+  if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
+  if (decision === 'human_review') return 'human';
+  // 运营抽查
+  if (score >= 85 && score <= 89) return 'spot_check';
+  if (risk === 'medium') return 'spot_check';
+  if (decision === 'rewrite') return 'spot_check';
+  // 自动通过：score>=90 且 auto_approve 且 检查通过 且 low risk
+  if (score >= 90 && d.auto_approve === true && checksPass && risk === 'low') return 'auto';
+  // 兜底：score 90+ 但缺 auto_approve 信号（如兜底/简版C输出）→ 抽查
+  return 'spot_check';
+}
 
 // 判断列名是否为语言代码 → 语种译文；否则 → 场景/用途说明
 function isLangColumn(header) {
@@ -927,7 +1001,11 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       cRes = { final: aRes.translation, consistency: 1, chosen: 'A', divergence: err.message, model: 'error' };
     }
 
-    const needsReview = cRes.consistency <= REVIEW_THRESHOLD;
+    // 程序检查（确定性，优先级高于模型评分）+ 三档分流
+    const prog = programChecks(sourceText, cRes.final, DB.glossary);
+    const route = classifyRoute(cRes, prog);   // auto | spot_check | human
+    const needsReview = route !== 'auto';       // 抽查和人工都进复核队列（抽查=可选核，人工=必核）
+    const progFail = !prog.pass;
     const result = {
       id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       taskId, rowIndex, sourceText, targetLang: lang,
@@ -939,9 +1017,11 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       divergence: cRes.divergence,        // 分歧说明
       validationScore: cRes.consistency,  // 兼容旧字段：用一致性作为分数
       confidence: Math.round((aRes.confidence + bRes.confidence) / 2),
+      route,                              // 分流结果 auto/spot_check/human
+      programChecks: prog.issues,         // 程序检查发现的硬性问题
       needsReview,
-      reviewReason: needsReview ? (cRes.divergence || `两版一致性偏低(${cRes.consistency}/10)`) : '',
-      reviewSeverity: cRes.consistency <= 3 ? 'high' : cRes.consistency <= 6 ? 'medium' : 'low',
+      reviewReason: needsReview ? (progFail ? '程序检查未过: ' + prog.issues.join('; ') : (cRes.divergence || (cRes.detail && cRes.detail.review_reason) || `一致性 ${cRes.consistency}/10`)) : '',
+      reviewSeverity: (route === 'human' ? 'high' : route === 'spot_check' ? 'medium' : 'low'),
       modelA: aRes.model, modelB: bRes.model, modelC: cRes.model,
       cDetail: cRes.detail || null,        // C 终审详细字段(评分/decision/风险/error_types等)
       createdAt: new Date().toISOString()
@@ -993,3 +1073,4 @@ app.listen(PORT, () => {
     console.log('');
   }
 });
+
