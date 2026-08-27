@@ -643,9 +643,9 @@ $('#restartBtn').onclick=()=>{ location.reload(); };
 $('#startBtn').onclick=async()=>{
   if(!state.selectedLangs.length){ toast('请至少选择一个语种','err'); return; }
   try{
-    await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({taskId:state.taskId,columnIndex:state.colIndex,targetLangs:state.selectedLangs,refColumns:state.refColumns,refTypes:Object.fromEntries(state.refColumns.map(i=>[i,refTypeOf(i)]))})}).then(r=>r.json());
-    $('#stLang').textContent=state.selectedLangs.length;
+    if(!r.success) throw new Error(r.error||'翻译服务未响应');
     showView(3); startPolling();
   }catch(e){ toast('启动失败：'+e.message,'err'); }
 };
