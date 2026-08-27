@@ -872,7 +872,7 @@ app.get('/api/training-samples', (req, res) => {
 // ============================================================
 
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
-const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '6', 10);
+const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '12', 10);
 
 // ---- 确定性程序检查（优先级高于模型评分：即使C给98分，%s数量错也拦截）----
 function programChecks(sourceText, finalText, glossary = {}) {
@@ -1037,12 +1037,23 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
     const rowIdxs = [];
     for (let i = 0; i < totalRows; i++) rowIdxs.push(i);
 
-    for (let i = 0; i < rowIdxs.length; i += conc) {
-      const chunk = rowIdxs.slice(i, i + conc);
-      await Promise.all(chunk.map(ri => processOne(ri, lang)));
-      saveDB();
-      console.log(`[Pipeline] ${lang} 进度 ${Math.min(i + conc, rowIdxs.length)}/${totalRows}`);
+    // 滑动窗口并发：始终保持 conc 个在途，一条完成立刻补下一条(消除分批的木桶效应)
+    let nextIdx = 0, doneCount = 0, lastLog = 0;
+    async function worker() {
+      while (nextIdx < rowIdxs.length) {
+        const ri = rowIdxs[nextIdx++];
+        await processOne(ri, lang);
+        doneCount++;
+        // 每完成 conc 条落盘一次+打点(避免频繁写盘)
+        if (doneCount - lastLog >= conc || doneCount === rowIdxs.length) {
+          lastLog = doneCount;
+          saveDB();
+          console.log(`[Pipeline] ${lang} 进度 ${doneCount}/${totalRows}`);
+        }
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(conc, rowIdxs.length) }, () => worker()));
+    saveDB();
   }
 
   task.status = 'completed';
