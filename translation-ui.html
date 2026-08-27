@@ -328,7 +328,7 @@
   <!-- STEP 3: progress -->
   <div id="view3" class="hidden">
     <h1 class="page">翻译与校验进行中</h1>
-    <p class="page-sub">模型 A(直译派)、B(意译派)各独立翻译 → 模型 C 结合完整上下文独立审校两版、给一致性评分 → 低于阈值进人工复核。</p>
+    <p class="page-sub">模型 A、B 按同一套prompt各独立翻译一遍 → 模型 C 结合完整上下文独立审校两版、给一致性评分 → 低于阈值进人工复核。</p>
     <div class="card">
       <div class="prog-head">
         <div><div style="font-size:13px;color:var(--muted);font-weight:600">总进度</div><div class="prog-pct" id="progPct">0%</div></div>
@@ -434,8 +434,8 @@ async function refreshStatus(){
 
 // ---- 模型设置（A/B/C 各自独立接口 + 可编辑 prompt）----
 const STEP_META = {
-  A: { title:'模型 A · 直译派翻译', sub:'忠实原文·术语精确（独立翻译）', vars:'{targetLang} {sourceText} {glossary} {refs}' },
-  B: { title:'模型 B · 意译派翻译', sub:'地道自然·贴合语境（独立翻译，看不到A）', vars:'{targetLang} {sourceText} {glossary} {refs}' },
+  A: { title:'模型 A · 翻译（主）', sub:'按产品本地化prompt翻译', vars:'{targetLang} {sourceText} {glossary} {refs}' },
+  B: { title:'模型 B · 翻译（独立复核）', sub:'同一套prompt独立再翻一遍(不看A)', vars:'{targetLang} {sourceText} {glossary} {refs}' },
   C: { title:'模型 C · 独立审校仲裁', sub:'结合原文/其他语言/场景/术语表独立审校A/B', vars:'{targetLang} {sourceText} {transA} {transB} {glossary} {refs}' }
 };
 let DEFAULT_PROMPTS = {};
