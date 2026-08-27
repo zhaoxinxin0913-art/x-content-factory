@@ -380,11 +380,43 @@ async function modelC_arbitrate(sourceText, transA, transB, targetLang, glossary
         : '';
       const prompt = fillPrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), glossary: glossaryText, refs: refs || '' });
       const r = await callLLM(cfg, prompt);
+
+      // 兼容两种输出：简版{final,consistency,chosen,divergence} 或 终审版{final_translation,decision,overall_score,auto_approve,...}
+      const final = r.final || r.final_translation || transA;
+      const decision = r.decision || '';
+      // chosen 归一化：模型可能填 'A'/'select_a'/'select_a→A'/'rewrite'/'融合' 等，统一成 A/B/C改写/merged
+      const rawChosen = String(r.chosen || decision || '').toLowerCase().trim();
+      let chosen;
+      if (/rewrite|改写/.test(rawChosen)) chosen = 'C改写';
+      else if (/merged|融合/.test(rawChosen)) chosen = 'merged';
+      else if (/select_b|→\s*b|\bb\b|译文b/.test(rawChosen)) chosen = 'B';
+      else if (/select_a|→\s*a|\ba\b|译文a/.test(rawChosen)) chosen = 'A';
+      else chosen = ({ select_a: 'A', select_b: 'B', rewrite: 'C改写', human_review: 'A' })[decision] || 'A';
+      // consistency：优先用给定值；否则由 overall_score(0-100) 折算为 1-10
+      let consistency;
+      if (typeof r.consistency === 'number') consistency = r.consistency;
+      else if (typeof r.overall_score === 'number') consistency = Math.round(r.overall_score / 10);
+      else consistency = 5;
+      // 强制送人工的信号：任一为真则压低一致性到阈值内，确保进复核队列
+      const forceReview = r.auto_approve === false || r.needs_human_review === true || decision === 'human_review';
+      if (forceReview) consistency = Math.min(consistency, 6);
+      // divergence / review_reason 合并为分歧说明
+      const divergence = r.divergence || r.review_reason || (Array.isArray(r.error_types) && r.error_types.length ? r.error_types.join('; ') : '');
+
       return {
-        final: r.final || transA,
-        consistency: typeof r.consistency === 'number' ? r.consistency : 5,
-        chosen: r.chosen || 'A',
-        divergence: r.divergence || '',
+        final,
+        consistency,
+        chosen,
+        divergence,
+        // 透传终审详细信息（供导出/复核参考，平台不强依赖）
+        detail: {
+          decision, overall_score: r.overall_score, risk_level: r.risk_level,
+          scene_category: r.scene_category, auto_approve: r.auto_approve,
+          semantic_accuracy: r.semantic_accuracy, completeness: r.completeness,
+          locale_naturalness: r.locale_naturalness, terminology_consistency: r.terminology_consistency,
+          ui_usability: r.ui_usability, format_integrity: r.format_integrity,
+          error_types: r.error_types, review_reason: r.review_reason, context_needed: r.context_needed
+        },
         model: cfg.model
       };
     } catch (error) {
@@ -760,6 +792,7 @@ app.get('/api/export-review/:taskId', (req, res) => {
     .filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id))
     .map(r => {
       const ref = refCells(r.rowIndex);
+      const d = r.cDetail || {};
       return {
         '原文': r.sourceText,
         '目标语言': langName(r.targetLang),
@@ -768,10 +801,13 @@ app.get('/api/export-review/:taskId', (req, res) => {
         '译文A': r.translationA || '',
         '译文B': r.translationB || '',
         'C推荐最终译文': r.translation || '',
-        'C选用': r.chosen === 'merged' ? '融合' : (r.chosen || ''),
+        'C裁决': d.decision || (r.chosen === 'merged' ? '融合' : ('译文' + (r.chosen || ''))),
+        'C总评分': (typeof d.overall_score === 'number' ? d.overall_score : ''),
+        '风险等级': d.risk_level || (sevName[r.reviewSeverity] || '需复核'),
         '一致性评分': r.consistency,
-        '分歧说明': r.divergence || '',
-        '风险等级': sevName[r.reviewSeverity] || '需复核',
+        '问题类型': Array.isArray(d.error_types) ? d.error_types.join('; ') : '',
+        '复核原因': d.review_reason || r.divergence || '',
+        '需补充语境': d.context_needed || '',
         '人工修正译文': ''  // 留空列，供同事填写
       };
     });
@@ -907,6 +943,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       reviewReason: needsReview ? (cRes.divergence || `两版一致性偏低(${cRes.consistency}/10)`) : '',
       reviewSeverity: cRes.consistency <= 3 ? 'high' : cRes.consistency <= 6 ? 'medium' : 'low',
       modelA: aRes.model, modelB: bRes.model, modelC: cRes.model,
+      cDetail: cRes.detail || null,        // C 终审详细字段(评分/decision/风险/error_types等)
       createdAt: new Date().toISOString()
     };
     DB.results.push(result);
