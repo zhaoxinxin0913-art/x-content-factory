@@ -435,6 +435,10 @@ async function modelC_arbitrate(sourceText, transA, transB, targetLang, glossary
 
 // 首页
 app.get('/', (req, res) => {
+  // 禁止浏览器缓存页面，确保改动后用户总是拿到最新版（避免旧JS残留导致的报错）
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.sendFile(path.join(__dirname, 'translation-ui.html'));
 });
 
