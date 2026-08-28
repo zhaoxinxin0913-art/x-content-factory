@@ -780,7 +780,15 @@ app.get('/api/export/:taskId', (req, res) => {
       }
     });
 
-    return { ...Object.fromEntries(row.map((cell, i) => [task.headers[i] || `col_${i}`, cell])), ...rowResults };
+    // 防御稀疏数组/缺列/整行undefined：按索引遍历补齐，避免 Object.fromEntries 遇到空洞报错
+    const safeRow = Array.isArray(row) ? row : [];
+    const colCount = Math.max(safeRow.length, (task.headers || []).length);
+    const baseEntries = {};
+    for (let i = 0; i < colCount; i++) {
+      const key = (task.headers && task.headers[i]) || `col_${i}`;
+      baseEntries[key] = safeRow[i] != null ? safeRow[i] : '';
+    }
+    return { ...baseEntries, ...rowResults };
   });
 
   // 创建工作簿
