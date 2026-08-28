@@ -90,6 +90,21 @@ async function callLLM(cfg, prompt) {
   return callOpenAI(cfg, prompt, temp);
 }
 
+// 带超时的 fetch：防止某个模型卡死拖垮整个翻译任务（默认60秒）
+const LLM_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS || '60000', 10);
+async function fetchWithTimeout(url, opts = {}, ms = LLM_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`LLM请求超时(${ms / 1000}s)`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // OpenAI Responses API：POST {baseUrl}/responses, body 用 input, 文本在 output[].content[].text
 async function callOpenAIResponses(cfg, prompt, temp) {
   const base = String(cfg.baseUrl || '').replace(/\/+$/, '');
@@ -97,7 +112,7 @@ async function callOpenAIResponses(cfg, prompt, temp) {
   const p = prompt + '\n\n只返回 JSON，不要任何额外解释或 markdown 代码块。';
   const send = async (withTemp) => {
     const payload = withTemp ? { model: cfg.model, input: p, temperature: temp } : { model: cfg.model, input: p };
-    return fetch(url, {
+    return fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'authorization': `Bearer ${cfg.apiKey}` },
       body: JSON.stringify(payload)
@@ -147,7 +162,7 @@ async function callAnthropic(cfg, prompt, temp) {
   // 部分新模型（如 claude-sonnet-5）弃用 temperature，仅在明确 <1 时发送，出错则自动重试不带该参数
   const send = async (withTemp) => {
     const payload = withTemp ? { ...body, temperature: temp } : body;
-    return fetch(url, {
+    return fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': cfg.apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(payload)
