@@ -691,6 +691,32 @@ app.get('/api/task/:taskId', (req, res) => {
   });
 });
 
+// 轻量进度接口：只返回统计数字，不返回全量 results（大批量轮询时前端不卡）
+app.get('/api/progress/:taskId', (req, res) => {
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+  const results = DB.results.filter(r => r.taskId === req.params.taskId);
+  const reviews = DB.reviews.filter(r => r.taskId === req.params.taskId);
+  const expectedTotal = (task.data ? task.data.filter(row => row[task.columnIndex]).length : 0)
+    * (task.targetLangs ? task.targetLangs.length : 0);
+  const done = results.length;
+  res.json({
+    success: true,
+    status: task.status,
+    progress: {
+      status: task.status,
+      done,
+      expectedTotal,
+      percent: expectedTotal > 0 ? Math.round(done / expectedTotal * 100) : (task.status === 'completed' ? 100 : 0),
+      needsReviewCount: results.filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id)).length,
+      reviewedCount: reviews.length,
+      autoCount: results.filter(r => r.route === 'auto').length,
+      spotCount: results.filter(r => r.route === 'spot_check').length,
+      humanCount: results.filter(r => r.route === 'human').length
+    }
+  });
+});
+
 // 人工复核
 app.post('/api/review', (req, res) => {
   const { taskId, resultId, decision, finalText } = req.body;

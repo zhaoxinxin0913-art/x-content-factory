@@ -657,9 +657,9 @@ function startPolling(){
 }
 async function poll(){
   try{
-    const res=await fetch('/api/task/'+state.taskId).then(r=>r.json());
+    // 翻译中只拉轻量进度(不含全量results, 大批量不卡); 完成后再拉一次全量
+    const res=await fetch('/api/progress/'+state.taskId).then(r=>r.json());
     if(!res.success) return;
-    state.results=res.results; state.reviews=res.reviews;
     const p=res.progress;
     $('#progPct').textContent=p.percent+'%';
     $('#progFill').style.width=p.percent+'%';
@@ -667,8 +667,11 @@ async function poll(){
     $('#stAuto').textContent=p.autoCount||0;
     $('#stSpot').textContent=p.spotCount||0;
     $('#stReview').textContent=p.humanCount!=null?p.humanCount:p.needsReviewCount;
-    if(res.task.status==='completed'){
+    if(res.status==='completed'){
       clearInterval(state.pollTimer);
+      // 完成后拉一次完整结果供复核/导出
+      const full=await fetch('/api/task/'+state.taskId).then(r=>r.json());
+      if(full.success){ state.results=full.results; state.reviews=full.reviews; }
       $('#progSpin').innerHTML='<svg class="ic-sm" style="stroke:var(--brand)" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg> 全部完成';
       $('#toReviewBtn').classList.remove('hidden');
     }
