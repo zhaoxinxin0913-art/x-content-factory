@@ -888,7 +888,7 @@ app.get('/api/training-samples', (req, res) => {
 // ============================================================
 
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
-const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '12', 10);
+const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '20', 10);
 
 // ---- 确定性程序检查（优先级高于模型评分：即使C给98分，%s数量错也拦截）----
 function programChecks(sourceText, finalText, glossary = {}) {
