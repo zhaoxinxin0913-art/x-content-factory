@@ -196,6 +196,7 @@ const LANGS = {
   'de': { name: '德语',     google: 'de', flag: '🇩🇪' },
   'it': { name: '意大利语', google: 'it', flag: '🇮🇹' },
   'ru': { name: '俄语',     google: 'ru', flag: '🇷🇺' },
+  'tr': { name: '土耳其语', google: 'tr', flag: '🇹🇷' },
   'zh-CN': { name: '简体中文', google: 'zh-CN', flag: '🇨🇳' },
   'zh-TW': { name: '繁体中文', google: 'zh-TW', flag: '🇹🇼' }
 };
