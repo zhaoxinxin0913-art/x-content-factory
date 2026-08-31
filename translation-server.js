@@ -930,8 +930,8 @@ function programChecks(sourceText, finalText, glossary = {}) {
   const issues = [];
   // 1. 译文非空
   if (!out.trim()) issues.push('译文为空');
-  // 2. 占位符集合一致（%s %d %1$s {name} {{var}}）
-  const phRe = /%\d*\$?[sd]|\{\{?\w+\}?\}/g;
+  // 2. 占位符集合一致（%s %d %1$s {name} {{var}} #num# #Username# 等）
+  const phRe = /%\d*\$?[sd]|\{\{?\w+\}?\}|#\w+#/g;
   const norm = arr => (arr || []).map(x => x.replace(/^\{+|\}+$/g, '')).sort().join(',');
   const srcPh = src.match(phRe) || [], outPh = out.match(phRe) || [];
   if (srcPh.length !== outPh.length) issues.push(`占位符数量不符(原文${srcPh.length}/译文${outPh.length})`);
