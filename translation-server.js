@@ -212,16 +212,32 @@ const DB_FILE = path.join(__dirname, 'translation-db.json');
 });
 
 // 数据库（简单 JSON 存储）
-let DB = { tasks: [], results: [], reviews: [], trainingSamples: [], glossary: {} };
+let DB = { tasks: [], results: [], reviews: [], trainingSamples: [], glossary: {}, glossaryML: [], dnt: [] };
 if (fs.existsSync(DB_FILE)) {
   try {
     DB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    // 兼容旧DB：补齐新增字段
+    if (!DB.glossaryML) DB.glossaryML = [];
+    if (!DB.dnt) DB.dnt = [];
   } catch (e) {
     console.error('DB load failed:', e);
   }
 }
 function saveDB() {
   fs.writeFileSync(DB_FILE, JSON.stringify(DB, null, 2));
+}
+
+// 按目标语言构建生效术语表：合并单语言 glossary + 多语言 glossaryML(取对应语列) + DNT 保留源文规则
+// 返回 { map: {原文:译法}, dntList: [...] }
+function buildGlossary(lang) {
+  const map = { ...(DB.glossary || {}) };  // 单语言表(向后兼容)
+  const base = String(lang || '').toLowerCase().split('-')[0];  // ja-JP → ja
+  for (const t of (DB.glossaryML || [])) {
+    if (!t || !t.en) continue;
+    const tr = t[base] || t[lang];
+    if (tr && String(tr).trim()) map[t.en] = String(tr).trim();
+  }
+  return { map, dntList: DB.dnt || [] };
 }
 
 // 文件上传配置
@@ -339,15 +355,28 @@ function simpleQualityScore(sourceText, translatedText, targetLang) {
 // 模型调用封装（支持 CC Switch 和兜底方案）
 // ============================================================
 
+// 把术语表(map)+DNT列表 组装成注入 prompt 的文本；兼容传入 {map,dntList} 或裸 map
+function glossaryToPrompt(glossary, verb = '请严格遵守') {
+  let map = glossary, dntList = [];
+  if (glossary && glossary.map) { map = glossary.map; dntList = glossary.dntList || []; }
+  const parts = [];
+  const entries = Object.entries(map || {});
+  if (entries.length) {
+    parts.push(`\n术语表（${verb}，锁定产品概念，允许目标语必要的语法变形）：\n${entries.map(([k, v]) => `${k} → ${v}`).join('\n')}`);
+  }
+  if (dntList && dntList.length) {
+    parts.push(`\n不可翻译词（DNT，命中时原样保留源文，不翻译/不音译，只匹配完整词）：\n${dntList.join('、')}`);
+  }
+  return parts.join('\n');
+}
+
 // 模型 A - 翻译第一遍
 async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '') {
   console.log(`[Model A] 翻译一: ${sourceText.substring(0, 40)}... → ${targetLang}`);
   const cfg = SETTINGS.models.A;
   if (modelConfigured(cfg)) {
     try {
-      const glossaryText = Object.keys(glossary).length > 0
-        ? `\n术语表（请严格遵守）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
-        : '';
+      const glossaryText = glossaryToPrompt(glossary, '请严格遵守');
       const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
       return { translation: result.translation || sourceText, confidence: result.confidence || 50, model: cfg.model };
@@ -367,9 +396,7 @@ async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '')
   const cfg = SETTINGS.models.B;
   if (modelConfigured(cfg)) {
     try {
-      const glossaryText = Object.keys(glossary).length > 0
-        ? `\n术语表（请严格遵守）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
-        : '';
+      const glossaryText = glossaryToPrompt(glossary, '请严格遵守');
       const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
       return { translation: result.translation || sourceText, confidence: result.confidence || 50, model: cfg.model };
@@ -389,9 +416,7 @@ async function modelC_arbitrate(sourceText, transA, transB, targetLang, glossary
   const cfg = SETTINGS.models.C;
   if (modelConfigured(cfg)) {
     try {
-      const glossaryText = Object.keys(glossary).length > 0
-        ? `\n术语表（请严格核对）：\n${Object.entries(glossary).map(([k, v]) => `${k} → ${v}`).join('\n')}`
-        : '';
+      const glossaryText = glossaryToPrompt(glossary, '请严格核对');
       const prompt = fillPrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), glossary: glossaryText, refs: refs || '' });
       const r = await callLLM(cfg, prompt);
 
@@ -908,6 +933,30 @@ app.post('/api/glossary', (req, res) => {
   res.json({ success: true, glossary: DB.glossary });
 });
 
+// 多语言术语库 + DNT：导入/查看。terms=[{en,zh,ja,fr,pt,es,...}], dnt=[...]
+app.get('/api/glossary-ml', (req, res) => {
+  res.json({ success: true, terms: DB.glossaryML || [], dnt: DB.dnt || [] });
+});
+
+app.post('/api/glossary-ml', (req, res) => {
+  const { terms, dnt, mode } = req.body;
+  if (Array.isArray(terms)) {
+    if (mode === 'replace') DB.glossaryML = [];
+    const byEn = {};
+    (DB.glossaryML || []).forEach(t => { if (t && t.en) byEn[t.en] = t; });
+    for (const t of terms) {
+      if (!t || !t.en) continue;
+      byEn[t.en] = { ...(byEn[t.en] || {}), ...t };   // 按 en 去重合并
+    }
+    DB.glossaryML = Object.values(byEn);
+  }
+  if (Array.isArray(dnt)) {
+    DB.dnt = mode === 'replace' ? [...new Set(dnt)] : [...new Set([...(DB.dnt || []), ...dnt])];
+  }
+  saveDB();
+  res.json({ success: true, termsCount: (DB.glossaryML || []).length, dntCount: (DB.dnt || []).length });
+});
+
 // 训练样本查看
 app.get('/api/training-samples', (req, res) => {
   res.json({
@@ -1038,14 +1087,15 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
     const refs = buildRefs(task, task.data[rowIndex]);
 
     let aRes, bRes, cRes;
+    const gloss = buildGlossary(lang);   // 按目标语言构建术语表(多语言取对应列)+DNT
     try {
       // A、B 两个模型独立翻译（并行）
       [aRes, bRes] = await Promise.all([
-        modelA_generate(sourceText, lang, DB.glossary, refs),
-        modelB_generate(sourceText, lang, DB.glossary, refs)
+        modelA_generate(sourceText, lang, gloss, refs),
+        modelB_generate(sourceText, lang, gloss, refs)
       ]);
       // C 比对裁决，择优/融合 + 一致性评分
-      cRes = await modelC_arbitrate(sourceText, aRes.translation, bRes.translation, lang, DB.glossary, refs);
+      cRes = await modelC_arbitrate(sourceText, aRes.translation, bRes.translation, lang, gloss, refs);
     } catch (err) {
       console.error(`[Pipeline] Row ${rowIndex + 1}/${lang} 失败: ${err.message}`);
       aRes = aRes || { translation: sourceText, confidence: 0, model: 'error' };
@@ -1054,7 +1104,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
     }
 
     // 程序检查（确定性，优先级高于模型评分）+ 三档分流
-    const prog = programChecks(sourceText, cRes.final, DB.glossary);
+    const prog = programChecks(sourceText, cRes.final, gloss.map);
     const route = classifyRoute(cRes, prog);   // auto | spot_check | human
     const needsReview = route !== 'auto';       // 抽查和人工都进复核队列（抽查=可选核，人工=必核）
     const progFail = !prog.pass;
