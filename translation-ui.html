@@ -354,7 +354,8 @@
     <div class="card" id="reviewCard">
       <h2 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <span style="display:flex;align-items:center;gap:8px"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg>待复核队列 <span id="reviewCount" style="font-size:13px;color:var(--muted);font-weight:600"></span></span>
-        <span style="display:flex;gap:8px">
+        <span style="display:flex;gap:8px;align-items:center">
+          <select id="reviewLangFilter" class="btn btn-soft" style="font-size:13px;padding:6px 10px;cursor:pointer"><option value="">全部语种</option></select>
           <button class="btn btn-soft" id="exportReviewXlsx" style="font-size:13px"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>导出待复核(Excel)</button>
           <button class="btn btn-soft" id="exportReviewCsv" style="font-size:13px">CSV</button>
         </span>
@@ -681,10 +682,27 @@ $('#toReviewBtn').onclick=()=>{ buildReview(); showView(4); };
 
 // ---- review ----
 function buildReview(){
-  const items=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
-  $('#reviewCount').textContent='('+items.length+' 条)';
+  const all=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  // 填充语种筛选下拉(仅列出待复核队列里实际出现的语种)
+  const langName=c=>{const l=state.langs.find(x=>x.code===c);return l?l.flag+' '+l.name:c;};
+  const langsInQueue=[...new Set(all.map(r=>r.targetLang))];
+  const sel=$('#reviewLangFilter');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">全部语种 ('+all.length+')</option>'+langsInQueue.map(c=>{
+    const n=all.filter(r=>r.targetLang===c).length;
+    return `<option value="${c}">${langName(c)} (${n})</option>`;
+  }).join('');
+  if(langsInQueue.includes(cur)) sel.value=cur;  // 保留已选
+  sel.onchange=()=>renderReviewList();
+  renderReviewList();
+}
+function renderReviewList(){
+  const langFilter=$('#reviewLangFilter').value;
+  let items=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  if(langFilter) items=items.filter(r=>r.targetLang===langFilter);
+  $('#reviewCount').textContent='('+items.length+' 条'+(langFilter?' · 已筛选':'')+')';
   if(!items.length){
-    $('#reviewList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><div>没有需要复核的条目，翻译质量良好 🎉</div></div>';
+    $('#reviewList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><div>'+(langFilter?'该语种没有待复核条目 🎉':'没有需要复核的条目，翻译质量良好 🎉')+'</div></div>';
     return;
   }
   const langName=c=>{const l=state.langs.find(x=>x.code===c);return l?l.flag+' '+l.name:c;};
