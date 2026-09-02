@@ -974,9 +974,11 @@ app.get('/api/training-samples', (req, res) => {
 const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '20', 10);
 
 // ---- 确定性程序检查（优先级高于模型评分：即使C给98分，%s数量错也拦截）----
-function programChecks(sourceText, finalText, glossary = {}) {
+function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   const src = String(sourceText || ''), out = String(finalText || '');
   const issues = [];
+  // emoji 匹配正则(复用于 未翻译判定 与 emoji一致性)
+  const emojiReGlobal = /(\p{Extended_Pictographic}(\uFE0F|\u200D\p{Extended_Pictographic})*|[\u{1F1E6}-\u{1F1FF}]{2})/gu;
   // 1. 译文非空
   if (!out.trim()) issues.push('译文为空');
   // 2. 占位符集合一致（%s %d %1$s {name} {{var}} #num# #Username# 等）
@@ -998,15 +1000,37 @@ function programChecks(sourceText, finalText, glossary = {}) {
   const srcNums = (src.match(numRe) || []).map(x => x.replace(/[,]/g, '')).sort().join(','),
         outNums = (out.match(numRe) || []).map(x => x.replace(/[,]/g, '')).sort().join(',');
   if (srcNums !== outNums) issues.push('数字/金额不一致');
-  // 6. 强制术语命中（原文含术语key，译文须含对应译法）
+  // 6. 强制术语命中（宽松：术语表锁定"概念"，允许目标语语法变形，故用词干前缀匹配而非全等）
+  //    如 Invite→Invitación，模型用 Invitar(动词变形)也算命中；避免死板字符串误判
   for (const [k, v] of Object.entries(glossary || {})) {
-    if (src.includes(k) && v && !out.includes(v)) issues.push(`术语未命中: ${k}→${v}`);
+    if (!v || !src.includes(k)) continue;
+    const outL = out.toLowerCase(), vL = String(v).toLowerCase();
+    if (outL.includes(vL)) continue;                       // 完全包含 → 命中
+    // 取译法的主词（最长的词），用前6字符(或更短)作词干，命中即算(容忍性数/冠词/变位)
+    const mainWord = vL.split(/[\s/、,，]+/).filter(Boolean).sort((a, b) => b.length - a.length)[0] || vL;
+    const stem = mainWord.slice(0, Math.max(4, Math.min(6, mainWord.length - 2)));
+    if (stem.length >= 4 && outL.includes(stem)) continue; // 词干命中 → 算命中(允许语法变形)
+    issues.push(`术语未命中: ${k}→${v}`);
   }
-  // 7. 译文疑似仍是英文/未翻译（目标非英文时，译文与原文完全相同且含大量ASCII字母）
-  if (out.trim() && out.trim() === src.trim() && /[a-zA-Z]{3,}/.test(out) && !/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(out)) {
-    // 仅当原文本身是英文时可疑（纯符号/数字不算）
-    if (/[a-zA-Z]/.test(src)) issues.push('译文疑似未翻译(与原文相同)');
+  // 7. 译文疑似未翻译（译文与原文完全相同且含英文字母）——排除DNT词/纯标识符(数字_符号)/极短词
+  if (out.trim() && out.trim() === src.trim() && /[a-zA-Z]/.test(src)
+      && !/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(out)) {
+    const stripped = src.replace(emojiReGlobal, '').trim();
+    const isIdentifier = /^[A-Za-z0-9 _\-\.]+$/.test(stripped) && /[0-9_]/.test(stripped); // 如 Diamond Exchange_3000
+    const dntOnly = (dntList || []).some(d => d && stripped === d);                        // 整条就是个DNT词
+    const tooShort = stripped.replace(/[^a-zA-Z]/g, '').length < 3;                        // 太短(如 OK, PK)
+    // 含真实句子(有空格且多词)才更可能是"该翻没翻"；单词/标识符宽容处理
+    if (!isIdentifier && !dntOnly && !tooShort) issues.push('译文疑似未翻译(与原文相同)');
   }
+  // 8. emoji 集合一致（原文有的 emoji 译文必须原样保留，不得删除或变乱码）
+  const emojiSort = s => ((String(s).match(emojiReGlobal)) || []).sort().join('');
+  const srcEmoji = emojiSort(src), outEmoji = emojiSort(out);
+  if (srcEmoji !== outEmoji) {
+    const sc = (src.match(emojiReGlobal) || []).length, oc = (out.match(emojiReGlobal) || []).length;
+    issues.push(`emoji不一致(原文${sc}个/译文${oc}个,须原样保留)`);
+  }
+  // 9. 译文含乱码替换符(U+FFFD)通常是编码损坏
+  if (/\uFFFD/.test(out)) issues.push('译文含乱码字符(编码损坏)');
   return { pass: issues.length === 0, issues };
 }
 
@@ -1104,7 +1128,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
     }
 
     // 程序检查（确定性，优先级高于模型评分）+ 三档分流
-    const prog = programChecks(sourceText, cRes.final, gloss.map);
+    const prog = programChecks(sourceText, cRes.final, gloss.map, gloss.dntList);
     const route = classifyRoute(cRes, prog);   // auto | spot_check | human
     const needsReview = route !== 'auto';       // 抽查和人工都进复核队列（抽查=可选核，人工=必核）
     const progFail = !prog.pass;
@@ -1186,4 +1210,5 @@ app.listen(PORT, () => {
     console.log('');
   }
 });
+
 
