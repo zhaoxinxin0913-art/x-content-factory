@@ -1036,7 +1036,7 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
 
 // ---- 三档自动分流（程序检查一票否决，优先于模型评分）----
 // 返回 'auto'(自动通过) | 'spot_check'(运营抽查) | 'human'(人工复审)
-function classifyRoute(cRes, progCheck) {
+function classifyRoute(cRes, progCheck, transA, transB) {
   const d = (cRes && cRes.detail) || {};
   const score = typeof d.overall_score === 'number' ? d.overall_score : (cRes.consistency * 10);
   const risk = d.risk_level || 'low';
@@ -1044,12 +1044,24 @@ function classifyRoute(cRes, progCheck) {
   const checksPass = progCheck.pass
     && d.placeholder_check !== 'fail' && d.terminology_check !== 'fail' && d.locale_check !== 'fail';
 
+  // 程序检查是硬约束，任何情况下未过都进人工（占位符/emoji/数字/术语等确定性错误）
+  if (!progCheck.pass) return 'human';
+  if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
+
+  // 【A/B 独立一致豁免】两个独立模型译出完全相同结果 + 程序检查全过 → 最强正确性信号，直接自动通过
+  // 不受 C 的 medium风险/decision=human_review 等"软性吹毛求疵"影响（除非真·高风险或C明确要重写）
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const abIdentical = norm(transA) && norm(transA) === norm(transB);
+  if (abIdentical && checksPass && risk !== 'high' && decision !== 'rewrite' && decision !== 'human_review') {
+    return 'auto';
+  }
+  // A/B 一致但 C 坚持要人审/重写(可能真有问题) → 降级为抽查而非直接人工，减轻负担
+  if (abIdentical && checksPass && risk !== 'high') return 'spot_check';
+
   // 人工复审（任一命中）
-  if (!progCheck.pass) return 'human';                       // 程序检查未过 → 一票否决进人工
   if (score < 70) return 'human';                            // 阈值放宽: <70 才必须人工(原<85)
   if (d.needs_human_review === true) return 'human';
   if (risk === 'high') return 'human';
-  if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
   if (decision === 'human_review') return 'human';
   // 运营抽查: 70-84 分 / medium风险 / rewrite
   if (score >= 70 && score <= 84) return 'spot_check';
@@ -1129,7 +1141,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
 
     // 程序检查（确定性，优先级高于模型评分）+ 三档分流
     const prog = programChecks(sourceText, cRes.final, gloss.map, gloss.dntList);
-    const route = classifyRoute(cRes, prog);   // auto | spot_check | human
+    const route = classifyRoute(cRes, prog, aRes.translation, bRes.translation);   // auto | spot_check | human
     const needsReview = route !== 'auto';       // 抽查和人工都进复核队列（抽查=可选核，人工=必核）
     const progFail = !prog.pass;
     const result = {
@@ -1210,5 +1222,6 @@ app.listen(PORT, () => {
     console.log('');
   }
 });
+
 
 
