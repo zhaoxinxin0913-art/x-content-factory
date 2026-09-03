@@ -1088,15 +1088,13 @@ function classifyRoute(cRes, progCheck, transA, transB, sourceText) {
   if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
 
   // 【A/B 独立一致豁免】两个独立模型译出完全相同结果 + 程序检查全过 → 最强正确性信号
-  // 非高危 → 直接自动通过(不受C软性吹毛求疵影响)；高危 → 至少抽查(不放行也不必占人工)
+  // 非高危 → 直接自动通过(彻底放行,忽略C的medium/human_review/rewrite等软性判断,不再出现在复核台)
+  // 高危(支付/安全/隐私/处罚/未成年) → 抽查(留一道人眼,但不占人工必审)
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const abIdentical = norm(transA) && norm(transA) === norm(transB);
-  if (abIdentical && checksPass && decision !== 'rewrite' && decision !== 'human_review') {
-    // 高危内容即使A/B一致也不自动放行，降到抽查(留一道人眼)；非高危直接自动通过
+  if (abIdentical && checksPass) {
     return risk === 'high' ? 'spot_check' : 'auto';
   }
-  // A/B 一致但 C 坚持要人审/重写 → 非高危降抽查减负；高危落到下方 high→human
-  if (abIdentical && checksPass && risk !== 'high') return 'spot_check';
 
   // 人工复审（任一命中）
   if (score < 70) return 'human';                            // 阈值放宽: <70 才必须人工(原<85)
@@ -1262,6 +1260,8 @@ app.listen(PORT, () => {
     console.log('');
   }
 });
+
+
 
 
 
