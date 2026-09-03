@@ -1012,15 +1012,18 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
     if (stem.length >= 4 && outL.includes(stem)) continue; // 词干命中 → 算命中(允许语法变形)
     issues.push(`术语未命中: ${k}→${v}`);
   }
-  // 7. 译文疑似未翻译（译文与原文完全相同且含英文字母）——排除DNT词/纯标识符(数字_符号)/极短词
+  // 7. 译文疑似未翻译（译文与原文完全相同且含英文字母）——仅对"真正的句子"判定
+  //    排除: DNT词/纯标识符/极短词/单词或短标签(如Total/View/Start，很多语言本就同形或合法保留)
   if (out.trim() && out.trim() === src.trim() && /[a-zA-Z]/.test(src)
       && !/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(out)) {
     const stripped = src.replace(emojiReGlobal, '').trim();
     const isIdentifier = /^[A-Za-z0-9 _\-\.]+$/.test(stripped) && /[0-9_]/.test(stripped); // 如 Diamond Exchange_3000
     const dntOnly = (dntList || []).some(d => d && stripped === d);                        // 整条就是个DNT词
-    const tooShort = stripped.replace(/[^a-zA-Z]/g, '').length < 3;                        // 太短(如 OK, PK)
-    // 含真实句子(有空格且多词)才更可能是"该翻没翻"；单词/标识符宽容处理
-    if (!isIdentifier && !dntOnly && !tooShort) issues.push('译文疑似未翻译(与原文相同)');
+    const wordCount = stripped.split(/\s+/).filter(Boolean).length;
+    // 只有"多词句子"(≥3词)原样未变才可疑；单词/双词短标签(Total/New Post/Voice Call)宽容——
+    // 它们可能本就同形、是专有名词、或被合法保留，误判代价高于漏判
+    const isSentence = wordCount >= 3;
+    if (!isIdentifier && !dntOnly && isSentence) issues.push('译文疑似未翻译(与原文相同)');
   }
   // 8. emoji 集合一致（原文有的 emoji 译文必须原样保留，不得删除或变乱码）
   const emojiSort = s => ((String(s).match(emojiReGlobal)) || []).sort().join('');
@@ -1259,6 +1262,7 @@ app.listen(PORT, () => {
     console.log('');
   }
 });
+
 
 
 
