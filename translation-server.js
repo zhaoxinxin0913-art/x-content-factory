@@ -1034,12 +1034,48 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   return { pass: issues.length === 0, issues };
 }
 
+// ---- 确定性高危内容识别（借鉴 localize-anything/risk_classifier 思想，适配中英混合社交App场景）----
+// 通过原文关键词确定性判定高危类别，作为 C 模型主观风险判断的兜底：
+// 即使 A/B 一致、C 判 low，只要命中支付/安全/隐私/法务/处罚/未成年等敏感词，也强制不自动放行。
+const HIGH_RISK_PATTERNS = [
+  // 支付/资产/退款（金额与承诺错误代价高）
+  /\b(payment|pay|refund|purchase|billing|withdraw|withdrawal|recharge|top ?up|subscription|subscribe|renew|charge|price|deposit|balance|wallet|transaction)\b/i,
+  /支付|付款|退款|充值|提现|订阅|续费|扣款|余额|钱包|交易|账单|购买/,
+  // 账号安全/认证
+  /\b(password|passcode|login|log ?in|sign ?in|sign ?out|verification code|two.?factor|2fa|authenticate|authentication|security|account security)\b/i,
+  /密码|验证码|登录|登陆|注销|账号安全|身份验证|双重验证|两步验证/,
+  // 隐私/权限
+  /\b(privacy|permission|personal (data|information)|grant access|allow access)\b/i,
+  /隐私|权限|个人信息|个人资料授权/,
+  // 法务/合规/同意
+  /\b(terms|policy|consent|agreement|license|disclaimer|tos|eula|compliance|legal)\b/i,
+  /条款|协议|隐私政策|用户协议|授权同意|合规|法律/,
+  // 处罚/封禁/申诉（治理，含义敏感）
+  /\b(ban|banned|suspend|suspension|restrict|restriction|block|blocked|appeal|violation|penalty|terminate)\b/i,
+  /封禁|封号|禁用|冻结|停用|限制|拉黑|申诉|违规|处罚|封停|解封/,
+  // 未成年人保护
+  /\b(minor|underage|child|children|parental)\b/i,
+  /未成年|未成年人|儿童|监护/,
+  // 破坏性操作
+  /\b(delete account|delete|remove|erase|reset|revoke|cancel subscription|permanently)\b/i,
+  /删除账号|注销账号|永久删除|清空|重置|撤销|解除绑定/,
+];
+// 返回命中的高危类别数(0=非高危)；用于确定性风险兜底
+function detectHighRisk(sourceText) {
+  const src = String(sourceText || '');
+  let hits = 0;
+  for (const re of HIGH_RISK_PATTERNS) { if (re.test(src)) hits++; }
+  return hits;
+}
+
 // ---- 三档自动分流（程序检查一票否决，优先于模型评分）----
 // 返回 'auto'(自动通过) | 'spot_check'(运营抽查) | 'human'(人工复审)
-function classifyRoute(cRes, progCheck, transA, transB) {
+function classifyRoute(cRes, progCheck, transA, transB, sourceText) {
   const d = (cRes && cRes.detail) || {};
   const score = typeof d.overall_score === 'number' ? d.overall_score : (cRes.consistency * 10);
-  const risk = d.risk_level || 'low';
+  // 确定性高危兜底：原文命中敏感词 → 风险至少拉到 high(即使C判低)，绝不因A/B一致而自动放行
+  const detRisk = detectHighRisk(sourceText) > 0;
+  const risk = detRisk ? 'high' : (d.risk_level || 'low');
   const decision = d.decision || '';
   const checksPass = progCheck.pass
     && d.placeholder_check !== 'fail' && d.terminology_check !== 'fail' && d.locale_check !== 'fail';
@@ -1048,20 +1084,21 @@ function classifyRoute(cRes, progCheck, transA, transB) {
   if (!progCheck.pass) return 'human';
   if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
 
-  // 【A/B 独立一致豁免】两个独立模型译出完全相同结果 + 程序检查全过 → 最强正确性信号，直接自动通过
-  // 不受 C 的 medium风险/decision=human_review 等"软性吹毛求疵"影响（除非真·高风险或C明确要重写）
+  // 【A/B 独立一致豁免】两个独立模型译出完全相同结果 + 程序检查全过 → 最强正确性信号
+  // 非高危 → 直接自动通过(不受C软性吹毛求疵影响)；高危 → 至少抽查(不放行也不必占人工)
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const abIdentical = norm(transA) && norm(transA) === norm(transB);
-  if (abIdentical && checksPass && risk !== 'high' && decision !== 'rewrite' && decision !== 'human_review') {
-    return 'auto';
+  if (abIdentical && checksPass && decision !== 'rewrite' && decision !== 'human_review') {
+    // 高危内容即使A/B一致也不自动放行，降到抽查(留一道人眼)；非高危直接自动通过
+    return risk === 'high' ? 'spot_check' : 'auto';
   }
-  // A/B 一致但 C 坚持要人审/重写(可能真有问题) → 降级为抽查而非直接人工，减轻负担
+  // A/B 一致但 C 坚持要人审/重写 → 非高危降抽查减负；高危落到下方 high→human
   if (abIdentical && checksPass && risk !== 'high') return 'spot_check';
 
   // 人工复审（任一命中）
   if (score < 70) return 'human';                            // 阈值放宽: <70 才必须人工(原<85)
   if (d.needs_human_review === true) return 'human';
-  if (risk === 'high') return 'human';
+  if (risk === 'high') return 'human';                       // A/B分歧的高危内容(支付/安全/隐私/处罚/未成年)必人审
   if (decision === 'human_review') return 'human';
   // 运营抽查: 70-84 分 / medium风险 / rewrite
   if (score >= 70 && score <= 84) return 'spot_check';
@@ -1141,7 +1178,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
 
     // 程序检查（确定性，优先级高于模型评分）+ 三档分流
     const prog = programChecks(sourceText, cRes.final, gloss.map, gloss.dntList);
-    const route = classifyRoute(cRes, prog, aRes.translation, bRes.translation);   // auto | spot_check | human
+    const route = classifyRoute(cRes, prog, aRes.translation, bRes.translation, sourceText);   // auto | spot_check | human
     const needsReview = route !== 'auto';       // 抽查和人工都进复核队列（抽查=可选核，人工=必核）
     const progFail = !prog.pass;
     const result = {
@@ -1222,6 +1259,7 @@ app.listen(PORT, () => {
     console.log('');
   }
 });
+
 
 
 
