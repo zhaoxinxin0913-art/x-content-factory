@@ -355,12 +355,17 @@
       <h2 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
         <span style="display:flex;align-items:center;gap:8px"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path d="M12 8v4l3 2"/></svg>待复核队列 <span id="reviewCount" style="font-size:13px;color:var(--muted);font-weight:600"></span></span>
         <span style="display:flex;gap:8px;align-items:center">
+          <select id="reviewRouteFilter" class="btn btn-soft" style="font-size:13px;padding:6px 10px;cursor:pointer">
+            <option value="human">🔴 人工必审</option>
+            <option value="spot_check">🟡 运营抽查</option>
+            <option value="">全部待复核</option>
+          </select>
           <select id="reviewLangFilter" class="btn btn-soft" style="font-size:13px;padding:6px 10px;cursor:pointer"><option value="">全部语种</option></select>
           <button class="btn btn-soft" id="exportReviewXlsx" style="font-size:13px"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>导出待复核(Excel)</button>
           <button class="btn btn-soft" id="exportReviewCsv" style="font-size:13px">CSV</button>
         </span>
       </h2>
-      <div class="hint">原文与译文并排展示，修正框留空则默认采用建议。点右上角可导出待复核条目发给同事。</div>
+      <div class="hint">默认只显示 <b style="color:#d9534f">🔴 人工必审</b>（真分歧/高风险）。<b style="color:#c8951a">🟡 运营抽查</b>（A/B一致但含敏感词等，大概率没问题）可在左上切换查看。修正框留空则采用建议。</div>
       <div id="reviewList"></div>
     </div>
     <div class="footer-actions">
@@ -682,8 +687,10 @@ $('#toReviewBtn').onclick=()=>{ buildReview(); showView(4); };
 
 // ---- review ----
 function buildReview(){
-  const all=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
-  // 填充语种筛选下拉(仅列出待复核队列里实际出现的语种)
+  const routeFilter=$('#reviewRouteFilter').value;  // 默认 human：主视图只看人工必审
+  let all=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  if(routeFilter) all=all.filter(r=>r.route===routeFilter);
+  // 填充语种筛选下拉(仅列出当前档位队列里实际出现的语种)
   const langName=c=>{const l=state.langs.find(x=>x.code===c);return l?l.flag+' '+l.name:c;};
   const langsInQueue=[...new Set(all.map(r=>r.targetLang))];
   const sel=$('#reviewLangFilter');
@@ -694,15 +701,23 @@ function buildReview(){
   }).join('');
   if(langsInQueue.includes(cur)) sel.value=cur;  // 保留已选
   sel.onchange=()=>renderReviewList();
+  $('#reviewRouteFilter').onchange=()=>buildReview();  // 切换档位时重建语种下拉
   renderReviewList();
 }
 function renderReviewList(){
   const langFilter=$('#reviewLangFilter').value;
+  const routeFilter=$('#reviewRouteFilter').value;
   let items=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  if(routeFilter) items=items.filter(r=>r.route===routeFilter);
   if(langFilter) items=items.filter(r=>r.targetLang===langFilter);
-  $('#reviewCount').textContent='('+items.length+' 条'+(langFilter?' · 已筛选':'')+')';
+  // 统计各档数量(用于计数提示)
+  const openAll=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  const nHuman=openAll.filter(r=>r.route==='human').length;
+  const nSpot=openAll.filter(r=>r.route==='spot_check').length;
+  $('#reviewCount').textContent='('+items.length+' 条 · 人工必审'+nHuman+'/抽查'+nSpot+')';
   if(!items.length){
-    $('#reviewList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><div>'+(langFilter?'该语种没有待复核条目 🎉':'没有需要复核的条目，翻译质量良好 🎉')+'</div></div>';
+    const label=routeFilter==='human'?'人工必审':(routeFilter==='spot_check'?'运营抽查':'待复核');
+    $('#reviewList').innerHTML='<div class="empty"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><div>'+(langFilter?'该语种没有'+label+'条目 🎉':'没有'+label+'条目，翻译质量良好 🎉')+'</div></div>';
     return;
   }
   const langName=c=>{const l=state.langs.find(x=>x.code===c);return l?l.flag+' '+l.name:c;};
