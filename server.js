@@ -9,6 +9,7 @@ if(fs.existsSync(path.join(__dirname,'.env'))){
 const PORT=5050,OUTPUT=path.join(__dirname,'output');
 fs.existsSync(OUTPUT)||fs.mkdirSync(OUTPUT);
 const{uploadToFeishu}=require('./feishu.js');
+const{searchImagesForPosts}=require('./image-search.js');
 
 // ============================================================
 const STYLES=[{cls:'s1',css:'background:#fafafa',txt:'color:#333'},
@@ -193,20 +194,29 @@ function genPreview(jobDir,handle,posts){
   const fontCSS=fs.readFileSync(path.join(__dirname,'fonts','font-face.css'),'utf8');
   let blocks='';
   posts.forEach((p,i)=>{const n=String(i+1).padStart(3,'0');
+    // 优先使用真实配图，没有则用AI生成卡片
+    const hasRealImage = p.imageSearch && p.imageSearch.images && p.imageSearch.images.length > 0;
+    const imgSrc = hasRealImage ? p.imageSearch.images[0].url : `imgs/card_${n}.png`;
+    const imgCredit = hasRealImage ? `<a href="${p.imageSearch.images[0].authorUrl}" target="_blank" style="font-size:10px;color:#999;text-decoration:none">📷 ${p.imageSearch.images[0].author}</a>` : '';
+    const imgDownload = hasRealImage ? p.imageSearch.images[0].downloadUrl : `/api/download/${handle}/imgs/card_${n}.png`;
+    
     blocks+=`<div class="post" id="post${i}">
-  <img src="imgs/card_${n}.png" style="width:200px;height:267px;object-fit:cover;flex-shrink:0;border-radius:8px 0 0 8px">
+  <div style="position:relative;width:200px;flex-shrink:0">
+    <img src="${imgSrc}" style="width:200px;height:267px;object-fit:cover;border-radius:8px 0 0 8px" onerror="this.src='imgs/card_${n}.png'">
+    ${imgCredit?`<div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px">${imgCredit}</div>`:''}
+  </div>
   <div class="body">
     <div class="th">🇹🇭 ${p.q}</div>
     <div class="cn">🇨🇳 ${p.cn||'—'}</div>
-    ${p.comments&&p.comments.length?`<div class="cmts"><div class="cmts-title">💬 热门评论</div>${p.comments.map(c=>`<div class="cmt"><span class="cmt-text">${c.text.replace(/\n/g,' ').substring(0,100)}</span><span class="cmt-likes">❤️${c.likes}</span></div>`).join('')}</div>`:''}
-    <div class="aria">${p.aria}</div>
+    ${hasRealImage?`<div style="font-size:11px;color:#999;margin:4px 0">🔍 关键词: ${p.imageSearch.query}</div>`:''}\n    ${p.comments&&p.comments.length?`<div class="cmts"><div class="cmts-title">💬 热门评论</div>${p.comments.map(c=>`<div class="cmt"><span class="cmt-text">${c.text.replace(/\n/g,' ').substring(0,100)}</span><span class="cmt-likes">❤️${c.likes}</span></div>`).join('')}</div>`:''}\n    <div class="aria">${p.aria}</div>
     <div class="tags">${p.tags.split(' ').map(t=>`<span class="t">${t}</span>`).join('')}</div>
     <div class="actions">
-      <a class="dl" href="/api/download/${handle}/imgs/card_${n}.png" download>⬇️</a>
+      <a class="dl" href="${imgDownload}" target="_blank">⬇️ 图片</a>
       ${p.link?`<a class="dl" href="${p.link}" target="_blank" style="background:#1d9bf0">🔗</a>`:''}
-      <button class="pub" onclick="togglePub(${i})" id="btn${i}">📌</button>
+      ${hasRealImage?`<a class="dl" href="imgs/card_${n}.png" download style="background:#666">🎨 AI卡片</a>`:''}\n      <button class="pub" onclick="togglePub(${i})" id="btn${i}">📌</button>
     </div>
-  </div></div>\n`});
+  </div></div>
+`});
   const html=`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>@${handle} 素材包</title><style>
 ${fontCSS}
@@ -718,6 +728,9 @@ const server=http.createServer(async(req,res)=>{
         const tf=path.join(jobDir,'translations.json');
         if(fs.existsSync(tf)){const tmap=JSON.parse(fs.readFileSync(tf,'utf8'));data.posts.forEach(p=>{const q=p.q;let best='',bk='';for(const[k,v]of Object.entries(tmap)){if(q.startsWith(k.substring(0,Math.min(40,k.length)))&&k.length>bk.length){bk=k;best=v}}if(best)p.cn=best})}
         await translatePosts(data.posts);
+        // 🖼️ 搜索真实配图
+        console.log('🔍 开始搜索配图...');
+        data.posts = await searchImagesForPosts(data.posts, 1200); // 每张图延迟1.2秒
         // 保存翻译缓存 + 更新 posts.json
         const tmap2={};data.posts.forEach(p=>{if(p.cn&&p.cn.length>5)tmap2[p.q.substring(0,40)]=p.cn});
         fs.writeFileSync(path.join(jobDir,'translations.json'),JSON.stringify({...(fs.existsSync(tf)?JSON.parse(fs.readFileSync(tf,'utf8')):{}),...tmap2},null,2));
