@@ -140,4 +140,39 @@ function createLimiter(concurrency) {
   }
   return fn => new Promise((resolve,reject)=>{queue.push({fn,resolve,reject});drain();});
 }
-module.exports = { DraftCache, cacheKey, validDraft, packBatches, generateDrafts, createLimiter };
+// Generic per-item batch → verdict mapper for a step that is NEVER cached (C).
+// Shared rubric is emitted once per batch (token saving); each verdict maps by
+// EXACT id. Missing / duplicate / invalid / total-failure rows fall back to a
+// single call — never positional mapping, so a scrambled batch can't mislabel.
+async function mapBatch({ items, pack, call, validate, single, maxItems = 100, maxOutputBytes = 12000 }) {
+  // Length-aware packing: bound item count AND estimated verdict output size.
+  const batches = []; let batch = [], out = 0;
+  for (const item of items) {
+    const est = Math.max(120, Buffer.byteLength(String(item.sourceText || '')) * 3 + 120);
+    if (batch.length && (batch.length >= maxItems || out + est > maxOutputBytes)) { batches.push(batch); batch = []; out = 0; }
+    batch.push(item); out += est;
+  }
+  if (batch.length) batches.push(batch);
+  const results = new Map();
+  for (const group of batches) {
+    let rows = [];
+    if (group.length > 1) {
+      try {
+        const resp = await call(pack(group), {maxTokens: 8192});
+        if (resp && Array.isArray(resp.items)) rows = resp.items;
+      } catch (_) { /* batch failure: every row retried singly below */ }
+    }
+    const byId = new Map(), counts = new Map();
+    for (const row of rows) {
+      if (!row || typeof row.id !== 'string') continue;
+      counts.set(row.id, (counts.get(row.id) || 0) + 1); byId.set(row.id, row);
+    }
+    await Promise.all(group.map(async item => {
+      const row = byId.get(item.id);
+      if (counts.get(item.id) === 1 && validate(row)) results.set(item.id, row);
+      else results.set(item.id, await single(item));
+    }));
+  }
+  return results;
+}
+module.exports = { DraftCache, cacheKey, validDraft, packBatches, generateDrafts, createLimiter, mapBatch };
