@@ -4,6 +4,12 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { DraftCache, generateDrafts, validDraft, createLimiter } = require('./translation-drafts');
+// Shared across A/B batches, retries, C and concurrent tasks (no batch multiplier).
+const limitLLM = createLimiter(process.env.TRANSLATE_CONCURRENCY || 20);
+const limitFallback = createLimiter(2);
+// Hidden directory is not served by express.static; context/credentials are hashed only.
+const draftCache = new DraftCache({ file: path.join(__dirname, '.translation-cache', 'drafts.json') });
 
 const app = express();
 const PORT = 5051;
@@ -83,11 +89,14 @@ function modelConfigured(m) { return !!(m && m.baseUrl && m.apiKey && m.model); 
 // 工具：填充 prompt 占位符
 function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)); }
 // 工具：调用某个模型（支持 openai / openai-responses / anthropic 三种协议）
-async function callLLM(cfg, prompt) {
+async function callLLM(cfg, prompt, options = {}) {
+  cfg = { ...cfg }; // settings endpoint mutates objects: freeze in-flight requests
+  return limitLLM(async () => {
   const temp = cfg.temperature != null ? cfg.temperature : 0.3;
-  if (cfg.protocol === 'anthropic') return callAnthropic(cfg, prompt, temp);
+  if (cfg.protocol === 'anthropic') return callAnthropic(cfg, prompt, temp, options);
   if (cfg.protocol === 'openai-responses') return callOpenAIResponses(cfg, prompt, temp);
   return callOpenAI(cfg, prompt, temp);
+  });
 }
 
 // 带超时的 fetch：防止某个模型卡死拖垮整个翻译任务（默认60秒）
@@ -151,12 +160,12 @@ async function callOpenAI(cfg, prompt, temp) {
 }
 
 // Anthropic Messages API：POST {baseUrl}/v1/messages, 认证 x-api-key
-async function callAnthropic(cfg, prompt, temp) {
+async function callAnthropic(cfg, prompt, temp, options = {}) {
   const base = String(cfg.baseUrl || '').replace(/\/+$/, '');
   const url = /\/v1$/.test(base) ? `${base}/messages` : `${base}/v1/messages`;
   const body = {
     model: cfg.model,
-    max_tokens: 1024,
+    max_tokens: options.maxTokens || 1024,
     messages: [{ role: 'user', content: prompt + '\n\n只返回 JSON，不要任何额外解释或 markdown 代码块。' }]
   };
   // 部分新模型（如 claude-sonnet-5）弃用 temperature，仅在明确 <1 时发送，出错则自动重试不带该参数
@@ -313,11 +322,13 @@ function translateWithMyMemory(text, targetLang) {
 
 // 组合兜底翻译：MyMemory 优先，Google 次之
 async function fallbackTranslate(text, targetLang) {
+  return limitFallback(async () => {
   let t = await translateWithMyMemory(text, targetLang);
   if (t) return { translation: t, engine: 'mymemory' };
   t = await translateWithGoogle(text, targetLang);
   if (t) return { translation: t, engine: 'google' };
   return { translation: text, engine: 'none' };
+  });
 }
 
 // 简单的质量评分（基于规则）
@@ -371,15 +382,16 @@ function glossaryToPrompt(glossary, verb = '请严格遵守') {
 }
 
 // 模型 A - 翻译第一遍
-async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '') {
+async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '', cfg = { ...SETTINGS.models.A }) {
   console.log(`[Model A] 翻译一: ${sourceText.substring(0, 40)}... → ${targetLang}`);
-  const cfg = SETTINGS.models.A;
+
   if (modelConfigured(cfg)) {
     try {
       const glossaryText = glossaryToPrompt(glossary, '请严格遵守');
       const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
-      return { translation: result.translation || sourceText, confidence: result.confidence || 50, model: cfg.model };
+      if (!validDraft(result)) throw new Error('Invalid translator draft response');
+      return { translation: result.translation, confidence: result.confidence, model: cfg.model };
     } catch (error) {
       console.error('[Model A] LLM error, fallback:', error.message);
     }
@@ -391,15 +403,16 @@ async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '')
 }
 
 // 模型 B - 翻译第二遍（独立翻译，不看 A 的结果）
-async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '') {
+async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '', cfg = { ...SETTINGS.models.B }) {
   console.log(`[Model B] 翻译二: ${sourceText.substring(0, 40)}... → ${targetLang}`);
-  const cfg = SETTINGS.models.B;
+
   if (modelConfigured(cfg)) {
     try {
       const glossaryText = glossaryToPrompt(glossary, '请严格遵守');
       const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
       const result = await callLLM(cfg, prompt);
-      return { translation: result.translation || sourceText, confidence: result.confidence || 50, model: cfg.model };
+      if (!validDraft(result)) throw new Error('Invalid translator draft response');
+      return { translation: result.translation, confidence: result.confidence, model: cfg.model };
     } catch (error) {
       console.error('[Model B] LLM error, fallback:', error.message);
     }
@@ -413,7 +426,7 @@ async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '')
 // 模型 C - 独立审校+仲裁：结合全部上下文(原文/其他语言/场景/术语表)审校 A/B 两版
 async function modelC_arbitrate(sourceText, transA, transB, targetLang, glossary = {}, refs = '') {
   console.log(`[Model C] 裁决: A="${String(transA).substring(0, 25)}" vs B="${String(transB).substring(0, 25)}"`);
-  const cfg = SETTINGS.models.C;
+  const cfg = { ...SETTINGS.models.C };
   if (modelConfigured(cfg)) {
     try {
       const glossaryText = glossaryToPrompt(glossary, '请严格核对');
@@ -994,7 +1007,7 @@ app.get('/api/training-samples', (req, res) => {
 // ============================================================
 
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
-const CONCURRENCY = parseInt(process.env.TRANSLATE_CONCURRENCY || '20', 10);
+const CONCURRENCY = Math.max(1, parseInt(process.env.TRANSLATE_CONCURRENCY || '20', 10) || 20);
 
 // ---- 确定性程序检查（优先级高于模型评分：即使C给98分，%s数量错也拦截）----
 function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
@@ -1164,6 +1177,39 @@ function buildRefs(task, row) {
   return out;
 }
 
+// Snapshot per bounded window, not per task: runtime setting/glossary edits apply
+// to the next window, while an in-flight draft is keyed by what it actually used.
+async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
+  const models = JSON.parse(JSON.stringify(SETTINGS.models));
+  const gloss = JSON.parse(JSON.stringify(buildGlossary(lang)));
+  const jobs = rowIdxs.map(rowIndex => {
+    const sourceText = String(task.data[rowIndex][columnIndex]);
+    const refs = buildRefs(task, task.data[rowIndex]);
+    const rawRefs = (task.refColumns || []).map(ci => ({
+      column: ci, header: task.headers[ci], value: task.data[rowIndex][ci], type: (task.refTypes || {})[ci]
+    }));
+    return {id:`row:${rowIndex}`, rowIndex, sourceText, refs, gloss,
+      context:{sourceText,targetLang:lang,refs,rawRefs,glossary:gloss,models,
+        glossaryData: {glossary:DB.glossary,glossaryML:DB.glossaryML,dnt:DB.dnt}}};
+  });
+  const run = step => {
+    const cfg = models[step];
+    const sharedPrompt = fillPrompt(cfg.prompt, {
+      targetLang:langName(lang), sourceText:'__ITEM_SOURCE_TEXT__',
+      glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:'__ITEM_REFS__'
+    });
+    const items = jobs.map(job => ({...job, sharedPrompt, prompt:fillPrompt(cfg.prompt, {
+      targetLang:langName(lang), sourceText:job.sourceText,
+      glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:job.refs || ''
+    })}));
+    return generateDrafts({step,items,cfg,cache:draftCache,stats:task.abDraftStats,configured:modelConfigured(cfg),call:callLLM,
+      single: (job, frozenCfg) => (step === 'A' ? modelA_generate : modelB_generate)(job.sourceText,lang,gloss,job.refs,frozenCfg)});
+  };
+  const [a,b] = await Promise.all([run('A'),run('B')]);
+  draftCache.flush();
+  return jobs.map(job => ({...job,aRes:a.get(job.id),bRes:b.get(job.id)}));
+}
+
 async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) return;
@@ -1173,21 +1219,22 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   console.log(`[Pipeline] Starting task ${taskId} (${anyLLM ? 'LLM' : 'Fallback'} mode, 并发=${conc}, 参考列=${(task.refColumns || []).length})`);
 
   const totalRows = task.data.length;
+  task.abDraftStats = {batchRequests:0,singleRequests:0,cacheHits:0,baselineInputBytes:0,actualInputBytes:0};
 
   const REVIEW_THRESHOLD = parseInt(process.env.REVIEW_THRESHOLD || '6', 10); // 一致性 ≤ 阈值 → 人工复核
 
   // 处理单条 (rowIndex, lang) 作业：A/B 双翻译 → C 比对裁决
-  async function processOne(rowIndex, lang) {
+  async function processOne(rowIndex, lang, draft) {
     const raw = task.data[rowIndex][columnIndex];
     if (raw === undefined || raw === null || String(raw) === '') return null;
     const sourceText = String(raw);
-    const refs = buildRefs(task, task.data[rowIndex]);
+    const refs = draft ? draft.refs : buildRefs(task, task.data[rowIndex]);
 
     let aRes, bRes, cRes;
-    const gloss = buildGlossary(lang);   // 按目标语言构建术语表(多语言取对应列)+DNT
+    const gloss = draft ? draft.gloss : buildGlossary(lang);
     try {
       // A、B 两个模型独立翻译（并行）
-      [aRes, bRes] = await Promise.all([
+      [aRes, bRes] = draft ? [draft.aRes,draft.bRes] : await Promise.all([
         modelA_generate(sourceText, lang, gloss, refs),
         modelB_generate(sourceText, lang, gloss, refs)
       ]);
@@ -1232,24 +1279,25 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   for (const lang of targetLangs) {
     console.log(`[Pipeline] Processing language: ${lang}`);
     const rowIdxs = [];
-    for (let i = 0; i < totalRows; i++) rowIdxs.push(i);
-
-    // 滑动窗口并发：始终保持 conc 个在途，一条完成立刻补下一条(消除分批的木桶效应)
-    let nextIdx = 0, doneCount = 0, lastLog = 0;
-    async function worker() {
-      while (nextIdx < rowIdxs.length) {
-        const ri = rowIdxs[nextIdx++];
-        await processOne(ri, lang);
-        doneCount++;
-        // 每完成 conc 条落盘一次+打点(避免频繁写盘)
-        if (doneCount - lastLog >= conc || doneCount === rowIdxs.length) {
-          lastLog = doneCount;
-          saveDB();
-          console.log(`[Pipeline] ${lang} 进度 ${doneCount}/${totalRows}`);
+    for (let i = 0; i < totalRows; i++) {
+      const raw = task.data[i][columnIndex];
+      if (raw !== undefined && raw !== null && String(raw) !== '') rowIdxs.push(i);
+    }
+    // At most 20 rows buffered; A/B independently pack smaller length-aware batches.
+    // C and deterministic checks ALWAYS execute per item, including cache hits.
+    for (let start = 0; start < rowIdxs.length; start += 20) {
+      const jobs = await generateDraftWindow(task,rowIdxs.slice(start,start+20),columnIndex,lang);
+      let next = 0;
+      async function worker() {
+        while (next < jobs.length) {
+          const job = jobs[next++];
+          await processOne(job.rowIndex,lang,job);
         }
       }
+      await Promise.all(Array.from({length:Math.min(conc,jobs.length)},()=>worker()));
+      saveDB();
+      console.log(`[Pipeline] ${lang} 进度 ${Math.min(start+20,rowIdxs.length)}/${rowIdxs.length}`);
     }
-    await Promise.all(Array.from({ length: Math.min(conc, rowIdxs.length) }, () => worker()));
     saveDB();
   }
 

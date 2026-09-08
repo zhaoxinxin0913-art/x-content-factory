@@ -10,5 +10,6 @@ translation-uploads/
 translation-output/
 translation-db.json
 translation-settings.json
+.translation-cache/
 hermes-verify-*.js
 .hermes-verify-*.js
