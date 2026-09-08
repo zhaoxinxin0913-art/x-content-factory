@@ -1283,10 +1283,10 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       const raw = task.data[i][columnIndex];
       if (raw !== undefined && raw !== null && String(raw) !== '') rowIdxs.push(i);
     }
-    // At most 20 rows buffered; A/B independently pack smaller length-aware batches.
+    // At most 100 rows buffered; A/B independently pack smaller length-aware batches.
     // C and deterministic checks ALWAYS execute per item, including cache hits.
-    for (let start = 0; start < rowIdxs.length; start += 20) {
-      const jobs = await generateDraftWindow(task,rowIdxs.slice(start,start+20),columnIndex,lang);
+    for (let start = 0; start < rowIdxs.length; start += 100) {
+      const jobs = await generateDraftWindow(task,rowIdxs.slice(start,start+100),columnIndex,lang);
       let next = 0;
       async function worker() {
         while (next < jobs.length) {
@@ -1296,7 +1296,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       }
       await Promise.all(Array.from({length:Math.min(conc,jobs.length)},()=>worker()));
       saveDB();
-      console.log(`[Pipeline] ${lang} 进度 ${Math.min(start+20,rowIdxs.length)}/${rowIdxs.length}`);
+      console.log(`[Pipeline] ${lang} 进度 ${Math.min(start+100,rowIdxs.length)}/${rowIdxs.length}`);
     }
     saveDB();
   }

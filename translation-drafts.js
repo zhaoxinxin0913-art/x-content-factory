@@ -70,7 +70,7 @@ function batchPrompt(batch) {
     : batch.map(({id,prompt})=>({id,prompt}));
   return BATCH_ENVELOPE + JSON.stringify(body);
 }
-function packBatches(items, {maxItems = 20, maxBytes = 48000, maxOutput = 6000} = {}) {
+function packBatches(items, {maxItems = 100, maxBytes = 48000, maxOutput = 6000} = {}) {
   const seen = new Set(); const batches = []; let batch = [], output = 0;
   for (const item of items) {
     if (typeof item.id !== 'string' || seen.has(item.id)) throw new Error('Invalid or duplicate input id');

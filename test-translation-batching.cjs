@@ -5,6 +5,16 @@ const os = require('node:os');
 const path = require('node:path');
 const modulePath = './translation-drafts';
 
+test('100-item ceiling retains automatic input/output safety splitting', () => {
+  const {packBatches}=require(modulePath);
+  const items=Array.from({length:101},(_,i)=>({id:String(i),prompt:'p',context:{sourceText:'x'}}));
+  assert.deepEqual(packBatches(items,{maxOutput:20000}).map(b=>b.length),[100,1]);
+  const safe=packBatches(items);
+  assert(safe[0].length>20);assert(safe.every(b=>b.length<=100));
+  assert.equal(safe.flat().length,101);
+  assert(packBatches(items.map(x=>({...x,context:{sourceText:'x'.repeat(1500)}}))).every(b=>b.length<safe[0].length));
+});
+
 test('default cache retains a multi-language batch and bounded single retries do not serialize', async () => {
   const {DraftCache,generateDrafts,createLimiter}=require(modulePath);
   const cache=new DraftCache();
