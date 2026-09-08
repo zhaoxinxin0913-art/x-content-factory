@@ -1,5 +1,5 @@
 const XLSX = require('xlsx-js-style');
-const KINDS = { approved: '无需人工复审', human: '待人工复审', spot_check: '运营抽查' };
+const KINDS = { approved: '无需人工复审', human: '待人工复审', spot_check: '运营抽查', all: '全部条目_高亮及原因' };
 const cellValue = v => v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : v;
 
 function buildClassifiedWorkbook(task, results, reviews, kind, languageName = l => l) {
@@ -15,7 +15,7 @@ function buildClassifiedWorkbook(task, results, reviews, kind, languageName = l 
   const headers = [...(task.headers || [])];
   const width = task.data.reduce((n, row) => Math.max(n, (row || []).length), headers.length);
   while (headers.length < width) headers.push(`col_${headers.length + 1}`);
-  const suffix = kind === 'human' ? '复审原因' : '抽查原因';
+  const suffix = kind === 'all' ? '复核原因' : kind === 'human' ? '复审原因' : '抽查原因';
   const rows = [[...headers, ...langs.flatMap(l => kind === 'approved' ? [languageName(l)] : [languageName(l), languageName(l) + suffix])]];
   const highlights = [], mapping = [['本表Excel行号', '原文件Excel行号']];
   task.data.forEach((raw, rowIndex) => {
@@ -31,13 +31,15 @@ function buildClassifiedWorkbook(task, results, reviews, kind, languageName = l 
       return { translation, route, reason: [...new Set(reasons)].join('\n') || r.divergence || (route === 'human' ? '需要人工复审' : '平台标记运营抽查') };
     });
     const hasHuman = cells.some(c => c.route === 'human');
-    if (!(kind === 'approved' ? !hasHuman : cells.some(c => c.route === kind))) return;
+    if (kind !== 'all' && !(kind === 'approved' ? !hasHuman : cells.some(c => c.route === kind))) return;
     const values = Array.from({ length: width }, (_, i) => cellValue((raw || [])[i]));
     cells.forEach((c, i) => {
       values.push(c.translation);
       if (kind !== 'approved') {
-        values.push(c.route === kind ? c.reason : '');
-        if (c.route === kind) highlights.push({ r: rows.length, c: width + i * 2 });
+        const flagged = kind === 'all' ? ['human', 'spot_check'].includes(c.route) : c.route === kind;
+        const label = kind === 'all' ? (c.route === 'human' ? '【人工复审】' : '【运营抽查】') : '';
+        values.push(flagged ? label + c.reason : '');
+        if (flagged) highlights.push({ r: rows.length, c: width + i * 2 });
       }
     });
     rows.push(values);

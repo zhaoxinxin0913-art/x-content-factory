@@ -381,7 +381,8 @@
       <h2><svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>下载翻译结果</h2>
       <div class="hint">保留原始列，仅在末尾增加译文。黄色单元格需处理，原因紧跟对应语种。</div>
       <div class="footer-actions" style="margin:18px 0;flex-wrap:wrap">
-        <button class="btn btn-primary" id="dlApproved">下载通过条目（无需人工复审）</button>
+        <button class="btn btn-primary" id="dlAllMarked">下载全部（高亮＋原因）</button>
+        <button class="btn btn-soft" id="dlApproved">下载通过条目（无需人工复审）</button>
         <button class="btn btn-soft" id="dlHuman">下载待人工复审（高亮＋原因）</button>
         <button class="btn btn-soft" id="dlSpot">下载运营抽查（独立副本）</button>
       </div>
@@ -795,7 +796,7 @@ async function downloadClassified(kind, button){
   }catch(e){ toast(e.message,'err'); }
   finally{ button.disabled=false; }
 }
-for(const [id,kind] of [['dlApproved','approved'],['dlHuman','human'],['dlSpot','spot_check']]){
+for(const [id,kind] of [['dlAllMarked','all'],['dlApproved','approved'],['dlHuman','human'],['dlSpot','spot_check']]){
   $("#"+id).onclick=()=>downloadClassified(kind,$("#"+id));
 }
 $('#dlXlsx').onclick=()=>{ window.location='/api/export/'+state.taskId+'?format=xlsx'; toast('开始下载 Excel','ok'); };

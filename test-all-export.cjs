@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const {buildClassifiedWorkbook}=require('./translation-classified-export');
+const X=require('xlsx-js-style');
+const task={headers:['id','id','en'],data:[[1,'k','=Hello'],[2,'m','Hi'],[3,'n','']],columnIndex:2,targetLangs:['es','ja']};
+const results=[{id:'a',rowIndex:0,targetLang:'es',translation:'Hola',route:'auto'},{id:'b',rowIndex:0,targetLang:'ja',translation:'こんにちは',route:'human',reviewReason:'语气问题'},{id:'c',rowIndex:1,targetLang:'es',translation:'Hola',route:'spot_check',reviewReason:'敏感词'},{id:'d',rowIndex:1,targetLang:'ja',translation:['やあ'],route:'auto'}];
+const wb=buildClassifiedWorkbook(task,results,[],'all',x=>x),s=wb.Sheets['翻译结果'];
+assert.equal(X.utils.sheet_to_json(s,{header:1}).length,4);
+assert.deepEqual(X.utils.sheet_to_json(s,{header:1})[0],['id','id','en','es','es复核原因','ja','ja复核原因']);
+assert.equal(s.E2.v,'');assert.match(s.G2.v,/人工复审.*语气问题/s);assert.match(s.E3.v,/运营抽查.*敏感词/s);
+for(const key of ['F2','D3','D4','F4'])assert.equal(s[key].s.fill.fgColor.rgb,'FFF2CC');
+assert.equal(s.D2.s,undefined);assert.equal(s.F3.v,'["やあ"]');assert.equal(s.C2.f,undefined);
+const fixed=buildClassifiedWorkbook(task,results,[{resultId:'b',decision:'fix',finalText:'修正'}],'all');assert.equal(fixed.Sheets['翻译结果'].F2.v,'修正');assert.equal(fixed.Sheets['翻译结果'].G2.v,'');assert.equal(fixed.Sheets['翻译结果'].F2.s,undefined);
+const back=X.read(X.write(wb,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellStyles:true});assert.equal(back.Sheets['翻译结果'].D3.s.fgColor.rgb,'FFF2CC');
+console.log('PASS 全部导出：完整原行、重复表头、两种复核原因、高亮、缺译、人工覆盖、样式回读');
