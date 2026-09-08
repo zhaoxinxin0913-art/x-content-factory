@@ -500,6 +500,16 @@ app.get('/api/langs', (req, res) => {
   res.json({ success: true, langs: list });
 });
 
+// 临时：补翻某任务失败/降级/缺失条目（余额恢复后用；跑完删除本端点）
+app.post('/api/admin/retranslate/:taskId', async (req, res) => {
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+  res.json({ success: true, message: 'retranslate started' }); // 立即返回，后台跑
+  retranslateFailed(req.params.taskId)
+    .then(s => console.log('[Retry] 完成', JSON.stringify(s)))
+    .catch(e => console.error('[Retry] 失败', e.message));
+});
+
 // 抽象流体渐变背景（可在线用 URL，也可下载到本地）
 app.get('/api/background.svg', (req, res) => {
   const dl = req.query.download === '1';
@@ -1252,6 +1262,64 @@ async function arbitrateWindow(jobs, lang) {
   return out;
 }
 
+// 组装单条结果（主流程与补翻共用，保证分档/复核原因逻辑完全一致）
+function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gloss) {
+  const prog = programChecks(sourceText, cRes.final, gloss.map, gloss.dntList);
+  const route = classifyRoute(cRes, prog, aRes.translation, bRes.translation, sourceText);
+  const needsReview = route !== 'auto';
+  const progFail = !prog.pass;
+  return {
+    id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    taskId, rowIndex, sourceText, targetLang: lang,
+    translation: cRes.final, translationA: aRes.translation, translationB: bRes.translation,
+    chosen: cRes.chosen, consistency: cRes.consistency, divergence: cRes.divergence,
+    validationScore: cRes.consistency,
+    confidence: Math.round((aRes.confidence + bRes.confidence) / 2),
+    route, programChecks: prog.issues, needsReview,
+    reviewReason: needsReview ? (progFail ? '程序检查未过: ' + prog.issues.join('; ') : (cRes.divergence || (cRes.detail && cRes.detail.review_reason) || `一致性 ${cRes.consistency}/10`)) : '',
+    reviewSeverity: (route === 'human' ? 'high' : route === 'spot_check' ? 'medium' : 'low'),
+    modelA: aRes.model, modelB: bRes.model, modelC: cRes.model,
+    cDetail: cRes.detail || null, createdAt: new Date().toISOString()
+  };
+}
+// 判定一条结果是否需要补翻：任一模型未调通(原样返回/免费兜底/规则兜底/error)
+function needsRetranslate(r) {
+  return [r.modelA, r.modelB, r.modelC].some(m => /no-engine|fallback|^error$|rule-based-arbiter/.test(String(m || '')));
+}
+// 补翻：只重跑失败/降级/缺失的 (行,语种)，替换旧结果(不追加重复)，保留已好的条目。
+async function retranslateFailed(taskId) {
+  const task = DB.tasks.find(t => t.id === taskId);
+  if (!task) throw new Error('Task not found');
+  const col = task.columnIndex, langs = task.targetLangs || [];
+  const valid = []; for (let i = 0; i < task.data.length; i++) { const v = task.data[i][col]; if (v != null && String(v).trim() !== '') valid.push(i); }
+  const have = new Set(DB.results.filter(r => r.taskId === taskId).map(r => `${r.rowIndex}|${r.targetLang}`));
+  const summary = { retranslated: 0, byLang: {} };
+  for (const lang of langs) {
+    // 需补：缺失 或 现有结果 needsRetranslate
+    const rows = valid.filter(i => {
+      const cur = DB.results.find(r => r.taskId === taskId && r.rowIndex === i && r.targetLang === lang);
+      return !cur || needsRetranslate(cur);
+    });
+    if (!rows.length) continue;
+    summary.byLang[lang] = rows.length;
+    for (let start = 0; start < rows.length; start += 100) {
+      const jobs = await generateDraftWindow(task, rows.slice(start, start + 100), col, lang);
+      const verdicts = await arbitrateWindow(jobs, lang);
+      for (const job of jobs) {
+        const cRes = verdicts.get(job.id);
+        const res = assembleResult(taskId, job.rowIndex, job.sourceText, lang, job.aRes, job.bRes, cRes, job.gloss);
+        // 替换：先删旧的同 (行,语种)，再插新的 → 不产生重复
+        const idx = DB.results.findIndex(r => r.taskId === taskId && r.rowIndex === job.rowIndex && r.targetLang === lang);
+        if (idx >= 0) DB.results.splice(idx, 1);
+        DB.results.push(res); summary.retranslated++;
+      }
+      saveDB();
+      console.log(`[Retry] ${lang} 补翻 ${Math.min(start + 100, rows.length)}/${rows.length}`);
+    }
+  }
+  saveDB();
+  return summary;
+}
 async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) return;
@@ -1290,31 +1358,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       cRes = { final: aRes.translation, consistency: 1, chosen: 'A', divergence: err.message, model: 'error' };
     }
 
-    // 程序检查（确定性，优先级高于模型评分）+ 三档分流
-    const prog = programChecks(sourceText, cRes.final, gloss.map, gloss.dntList);
-    const route = classifyRoute(cRes, prog, aRes.translation, bRes.translation, sourceText);   // auto | spot_check | human
-    const needsReview = route !== 'auto';       // 抽查和人工都进复核队列（抽查=可选核，人工=必核）
-    const progFail = !prog.pass;
-    const result = {
-      id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      taskId, rowIndex, sourceText, targetLang: lang,
-      translation: cRes.final,            // 最终译文 = C 裁决结果
-      translationA: aRes.translation,     // A 版
-      translationB: bRes.translation,     // B 版
-      chosen: cRes.chosen,                // C 选了 A/B/merged
-      consistency: cRes.consistency,      // 一致性评分 1-10
-      divergence: cRes.divergence,        // 分歧说明
-      validationScore: cRes.consistency,  // 兼容旧字段：用一致性作为分数
-      confidence: Math.round((aRes.confidence + bRes.confidence) / 2),
-      route,                              // 分流结果 auto/spot_check/human
-      programChecks: prog.issues,         // 程序检查发现的硬性问题
-      needsReview,
-      reviewReason: needsReview ? (progFail ? '程序检查未过: ' + prog.issues.join('; ') : (cRes.divergence || (cRes.detail && cRes.detail.review_reason) || `一致性 ${cRes.consistency}/10`)) : '',
-      reviewSeverity: (route === 'human' ? 'high' : route === 'spot_check' ? 'medium' : 'low'),
-      modelA: aRes.model, modelB: bRes.model, modelC: cRes.model,
-      cDetail: cRes.detail || null,        // C 终审详细字段(评分/decision/风险/error_types等)
-      createdAt: new Date().toISOString()
-    };
+    const result = assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gloss);
     DB.results.push(result);
     return result;
   }

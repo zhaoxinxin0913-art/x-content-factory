@@ -82,29 +82,32 @@ test('actual pipeline batches A/B, always reruns per-row C/checks and never recl
   const stored = {id:'stored',route:'human',needsReview:true,translation:'existing'};
   const DB = {tasks:[{id:'test',data,headers:['source']}],results:[stored]};
   const models=Object.fromEntries(['A','B','C'].map(step=>[step,{model:step,prompt:'translate {sourceText} {targetLang} {glossary} {refs}',protocol:'openai',apiKey:'fake',baseUrl:'https://test',temperature:0.3}]));
-  let batchCalls=0,singleCalls=0,cCalls=0;
+  let abBatch=0,singleCalls=0,cBatch=0;
   const sandbox={console:{log(){},error(){}},process:{env:{}},DB,SETTINGS:{models},...drafts,
     draftCache:new drafts.DraftCache(),modelConfigured:()=>true,buildGlossary:()=>({map:{},dntList:[]}),
     langName:x=>x,glossaryToPrompt:()=>'',fillPrompt:(s,v)=>s.replace(/\{(\w+)\}/g,(_,k)=>v[k]),
     saveDB(){},buildRefs:()=>'',
     callLLM:async(cfg,prompt)=>{
-      batchCalls++;
-      const inputs=JSON.parse(prompt.slice(prompt.indexOf('\n')+1)).items;
-      return {items:inputs.map(({id})=>({id,translation:'translated '+id.split(':').pop()+' %s',confidence:90}))};
+      const body=JSON.parse(prompt.slice(prompt.indexOf('{"sharedPrompt"')>=0?prompt.indexOf('{"sharedPrompt"'):prompt.indexOf('{"items"')));
+      if(cfg.model==='C'){cBatch++;return {items:body.items.map(it=>({id:it.id,final:'broken placeholder',overall_score:20,auto_approve:false}))};}
+      abBatch++;return {items:body.items.map(it=>({id:it.id,translation:'translated '+it.id.split(':').pop()+' %s',confidence:90}))};
     },
     modelA_generate:async()=>{singleCalls++;return {translation:'single',confidence:90,model:'A'};},
     modelB_generate:async()=>{singleCalls++;return {translation:'single',confidence:90,model:'B'};},
-    modelC_arbitrate:async()=>{cCalls++;return {final:'broken placeholder',consistency:10,model:'C',detail:{auto_approve:true}};}
   };
+  sandbox.normalizeCVerdict=(r,tA,m)=>({final:r.final||tA,consistency:typeof r.overall_score==='number'?Math.round(r.overall_score/10):5,chosen:'A',divergence:'',detail:{auto_approve:r.auto_approve},model:m});
+  sandbox.ruleArbitrate=(tA,tB)=>({final:tA||tB,consistency:10,chosen:'A',divergence:'',model:'rule-based-arbiter'});
+  sandbox.modelC_arbitrate=async(s,tA)=>({final:'broken placeholder',consistency:2,chosen:'A',divergence:'',detail:{auto_approve:false},model:'C'});
   vm.createContext(sandbox);vm.runInContext(core,sandbox);
   await sandbox.processTranslationPipeline('test',0,['ja']);
-  assert.equal(batchCalls,2,'A/B should each send one short batch'); assert.equal(singleCalls,0);
-  assert.equal(cCalls,20); assert.ok(DB.results.slice(1).every(r=>r.route==='human' && r.programChecks.length));
+  assert.equal(abBatch,2,'A/B should each send one short batch'); assert.equal(singleCalls,0);
+  assert.equal(cBatch,1,'C reviews the window in ONE batch');
+  assert.ok(DB.results.slice(1).every(r=>r.route==='human' && r.programChecks.length),'per-row checks still run');
   await sandbox.processTranslationPipeline('test',0,['ja']);
-  assert.equal(batchCalls,2,'second run must reuse drafts'); assert.equal(cCalls,40,'C must never be cached');
+  assert.equal(abBatch,2,'second run must reuse A/B drafts'); assert.equal(cBatch,2,'C must never be cached');
   models.A.temperature=0.7;
   await sandbox.processTranslationPipeline('test',0,['ja']);
-  assert.equal(batchCalls,4,'mutated runtime configuration must invalidate cache'); assert.equal(cCalls,60);
+  assert.equal(abBatch,4,'mutated runtime configuration must invalidate cache'); assert.equal(cBatch,3);
   assert.deepEqual(stored,{id:'stored',route:'human',needsReview:true,translation:'existing'});
 });
 
