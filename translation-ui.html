@@ -379,7 +379,13 @@
     <p class="page-sub">译文已写回原表结构。人工修正的条目将覆盖模型译文。</p>
     <div class="card">
       <h2><svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>下载翻译结果</h2>
-      <div class="hint">选择导出格式，文件包含原始列 + 各语种译文列。</div>
+      <div class="hint">保留原始列，仅在末尾增加译文。黄色单元格需处理，原因紧跟对应语种。</div>
+      <div class="footer-actions" style="margin:18px 0;flex-wrap:wrap">
+        <button class="btn btn-primary" id="dlApproved">下载通过条目（无需人工复审）</button>
+        <button class="btn btn-soft" id="dlHuman">下载待人工复审（高亮＋原因）</button>
+        <button class="btn btn-soft" id="dlSpot">下载运营抽查（独立副本）</button>
+      </div>
+      <div class="hint">通过表包含运营抽查；抽查表仅供核对，不要追加合并。缺失译文会列入人工复审，已有结果沿用平台分档。</div>
       <div class="stat-row" style="grid-template-columns:repeat(3,1fr)">
         <div class="stat"><div class="v" id="exTotal">0</div><div class="l">翻译条目</div></div>
         <div class="stat"><div class="v" id="exReviewed">0</div><div class="l">人工修正</div></div>
@@ -773,6 +779,24 @@ async function loadExportStats(){
     const ts=await fetch('/api/training-samples').then(r=>r.json());
     $('#exSamples').textContent=ts.total;
   }catch(e){}
+}
+async function downloadClassified(kind, button){
+  if(!state.taskId){ toast('请先完成翻译','err'); return; }
+  button.disabled=true;
+  try{
+    const res=await fetch('/api/export-classified/'+encodeURIComponent(state.taskId)+'?kind='+kind);
+    if(!res.ok){ const err=await res.json(); throw new Error(err.error||'下载失败'); }
+    const blob=await res.blob(), url=URL.createObjectURL(blob), a=document.createElement('a');
+    const filename=(res.headers.get('Content-Disposition')||'').match(/filename\*=UTF-8''([^;]+)/i);
+    a.href=url; a.download=filename?decodeURIComponent(filename[1]):'翻译结果.xlsx';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    toast('文件已生成，开始下载','ok');
+  }catch(e){ toast(e.message,'err'); }
+  finally{ button.disabled=false; }
+}
+for(const [id,kind] of [['dlApproved','approved'],['dlHuman','human'],['dlSpot','spot_check']]){
+  $("#"+id).onclick=()=>downloadClassified(kind,$("#"+id));
 }
 $('#dlXlsx').onclick=()=>{ window.location='/api/export/'+state.taskId+'?format=xlsx'; toast('开始下载 Excel','ok'); };
 $('#dlCsv').onclick=()=>{ window.location='/api/export/'+state.taskId+'?format=csv'; toast('开始下载 CSV','ok'); };

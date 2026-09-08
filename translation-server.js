@@ -777,6 +777,29 @@ app.post('/api/review', (req, res) => {
   res.json({ success: true, review });
 });
 
+// 分类导出只读快照，不改变任务、模型、译文或人工复核记录。
+app.get('/api/export-classified/:taskId', (req, res) => {
+  const { buildClassifiedWorkbook, KINDS } = require('./translation-classified-export');
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ error: '任务不存在' });
+  const kind = req.query.kind;
+  if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) return res.status(400).json({ error: '无效导出类型' });
+  if (task.status !== 'completed') return res.status(409).json({ error: '请等待翻译完成后再导出' });
+  try {
+    const results = DB.results.filter(r => r.taskId === task.id);
+    const reviews = DB.reviews.filter(r => r.taskId === task.id);
+    const wb = buildClassifiedWorkbook(task, results, reviews, kind, langName);
+    const data = require('xlsx-js-style').write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const base = String(task.filename || task.id).replace(/\.(xlsx|xls|csv)$/i, '');
+    const name = `${base}_${KINDS[kind]}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="translation.xlsx"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(data);
+  } catch (err) {
+    console.error('[Classified export]', err.message);
+    res.status(500).json({ error: '导出失败：' + err.message });
+  }
+});
+
 // 导出结果
 app.get('/api/export/:taskId', (req, res) => {
   const task = DB.tasks.find(t => t.id === req.params.taskId);
