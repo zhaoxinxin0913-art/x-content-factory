@@ -76,3 +76,30 @@ test('retranslateFailed replaces ONLY bad rows, keeps good ones, no duplicates, 
   assert.ok(pt.every(r=>!sandbox.needsRetranslate(r)),'no bad pt rows remain');
   assert.ok(summary.retranslated>=3, 'summary counts retranslated');
 });
+
+test('retranslateFailed refuses to run twice concurrently for the same task', async () => {
+  const data = Array.from({length:6},(_,i)=>[`row ${i}`]);
+  const results = data.map((_,i)=>({id:'b'+i,taskId:'t',rowIndex:i,targetLang:'pt',translation:'x',modelA:'no-engine-fallback',modelB:'x',modelC:'y',route:'human'}));
+  const DB = {tasks:[{id:'t',data,headers:['s'],columnIndex:0,targetLangs:['pt']}], results};
+  let cCalls=0;
+  const sandbox = baseSandbox({DB,
+    callLLM:async(cfg,prompt)=>{ await new Promise(r=>setTimeout(r,20));
+      const body=JSON.parse(prompt.slice(prompt.indexOf('{"sharedPrompt"')>=0?prompt.indexOf('{"sharedPrompt"'):prompt.indexOf('{"items"')));
+      if(cfg.model==='C'){cCalls++;return {items:body.items.map(it=>({id:it.id,final:'G '+it.id,consistency:9,decision:'select_a',auto_approve:true,review_reason:''}))};}
+      return {items:body.items.map(it=>({id:it.id,translation:'G '+it.id,confidence:95}))};
+    },
+    modelA_generate:async()=>({translation:'G',confidence:95,model:'A'}),
+    modelB_generate:async()=>({translation:'G',confidence:95,model:'B'}),
+  });
+  sandbox.normalizeCVerdict=(r,tA,m)=>({final:r.final||tA,consistency:9,chosen:'A',divergence:'',detail:{},model:m});
+  sandbox.ruleArbitrate=(tA,tB)=>({final:tA||tB,consistency:10,chosen:'A',divergence:'',model:'rule-based-arbiter'});
+  sandbox.modelC_arbitrate=async(s,tA)=>({final:'G',consistency:9,chosen:'A',divergence:'',detail:{},model:'C'});
+  loadCore(sandbox);
+  const [a,b] = await Promise.all([sandbox.retranslateFailed('t'), sandbox.retranslateFailed('t')]);
+  // exactly one ran; the other was refused (returns a skipped marker)
+  const ran = [a,b].filter(x=>x && !x.skipped);
+  const skipped = [a,b].filter(x=>x && x.skipped);
+  assert.equal(ran.length,1,'only one retranslate runs');
+  assert.equal(skipped.length,1,'the concurrent duplicate is refused');
+  assert.equal(DB.results.filter(r=>r.targetLang==='pt').length,6,'no duplicate rows');
+});

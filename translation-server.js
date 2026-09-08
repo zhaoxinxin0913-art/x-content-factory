@@ -1289,13 +1289,17 @@ function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gl
 function needsRetranslate(r) {
   return [r.modelA, r.modelB, r.modelC].some(m => /no-engine|fallback|^error$|rule-based-arbiter/.test(String(m || '')));
 }
+// 防止同一任务的补翻被并行触发（重复触发会两个循环互相覆盖、空转烧 token）。
+const retranslateInFlight = new Set();
 // 补翻：只重跑失败/降级/缺失的 (行,语种)，替换旧结果(不追加重复)，保留已好的条目。
 async function retranslateFailed(taskId) {
   const task = DB.tasks.find(t => t.id === taskId);
   if (!task) throw new Error('Task not found');
+  if (retranslateInFlight.has(taskId)) return { skipped: true, reason: 'already running' };
+  retranslateInFlight.add(taskId);
+  try {
   const col = task.columnIndex, langs = task.targetLangs || [];
   const valid = []; for (let i = 0; i < task.data.length; i++) { const v = task.data[i][col]; if (v != null && String(v).trim() !== '') valid.push(i); }
-  const have = new Set(DB.results.filter(r => r.taskId === taskId).map(r => `${r.rowIndex}|${r.targetLang}`));
   const summary = { retranslated: 0, byLang: {} };
   for (const lang of langs) {
     // 需补：缺失 或 现有结果 needsRetranslate
@@ -1322,6 +1326,9 @@ async function retranslateFailed(taskId) {
   }
   saveDB();
   return summary;
+  } finally {
+    retranslateInFlight.delete(taskId);
+  }
 }
 async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   const task = DB.tasks.find(t => t.id === taskId);
