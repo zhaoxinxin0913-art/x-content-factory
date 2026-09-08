@@ -101,13 +101,13 @@ test('actual pipeline batches A/B, always reruns per-row C/checks and never recl
   vm.createContext(sandbox);vm.runInContext(core,sandbox);
   await sandbox.processTranslationPipeline('test',0,['ja']);
   assert.equal(abBatch,2,'A/B should each send one short batch'); assert.equal(singleCalls,0);
-  assert.equal(cBatch,1,'C reviews the window in ONE batch');
+  assert.equal(cBatch,2,'C reviews the 20-row window in small (<=15) batches');
   assert.ok(DB.results.slice(1).every(r=>r.route==='human' && r.programChecks.length),'per-row checks still run');
   await sandbox.processTranslationPipeline('test',0,['ja']);
-  assert.equal(abBatch,2,'second run must reuse A/B drafts'); assert.equal(cBatch,2,'C must never be cached');
+  assert.equal(abBatch,2,'second run must reuse A/B drafts'); assert.equal(cBatch,4,'C must never be cached (re-runs)');
   models.A.temperature=0.7;
   await sandbox.processTranslationPipeline('test',0,['ja']);
-  assert.equal(abBatch,4,'mutated runtime configuration must invalidate cache'); assert.equal(cBatch,3);
+  assert.equal(abBatch,4,'mutated runtime configuration must invalidate cache'); assert.equal(cBatch,6);
   assert.deepEqual(stored,{id:'stored',route:'human',needsReview:true,translation:'existing'});
 });
 

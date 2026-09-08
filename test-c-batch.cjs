@@ -106,6 +106,44 @@ test('pipeline batches C once per window, keeps per-item programChecks and routi
   assert.ok(DB.results.every(r=>['auto','spot_check','human'].includes(r.route)),'each row routed');
 });
 
+test('C batch prompt requests a COMPACT per-item output and small batches to avoid truncation', async () => {
+  const vm = require('node:vm'); const fs = require('node:fs'); const path = require('node:path');
+  const drafts = require('./translation-drafts');
+  const server = fs.readFileSync(path.join(__dirname,'translation-server.js'),'utf8');
+  const core = server.slice(server.indexOf('const CONCURRENCY ='), server.indexOf('// 启动服务'));
+  const data = Array.from({length:60},(_,i)=>[`row ${i}`]);
+  const DB = {tasks:[{id:'t',data,headers:['s'],columnIndex:0,targetLangs:['ja']}], results:[]};
+  const models = Object.fromEntries(['A','B','C'].map(s=>[s,{model:s,prompt:'{sourceText}{targetLang}{glossary}{refs}{transA}{transB}',protocol:'openai',apiKey:'k',baseUrl:'u'}]));
+  const cPrompts=[]; const cBatchSizes=[]; let maxTok=0;
+  const sandbox={console:{log(){},error(){}},process:{env:{}},DB,SETTINGS:{models},...drafts,
+    draftCache:new drafts.DraftCache(),modelConfigured:()=>true,buildGlossary:()=>({map:{},dntList:[]}),
+    langName:x=>x,glossaryToPrompt:()=>'',fillPrompt:(s,v)=>s.replace(/\{(\w+)\}/g,(_,k)=>v[k]),
+    saveDB(){},buildRefs:()=>'',
+    callLLM:async(cfg,prompt,opts)=>{
+      const body=JSON.parse(prompt.slice(prompt.indexOf('{"sharedPrompt"')>=0?prompt.indexOf('{"sharedPrompt"'):prompt.indexOf('{"items"')));
+      if(cfg.model==='C'){cPrompts.push(prompt); cBatchSizes.push(body.items.length); maxTok=Math.max(maxTok,opts&&opts.maxTokens||0);
+        return {items:body.items.map(it=>({id:it.id,final:'c '+it.id,consistency:8,decision:'select_a',auto_approve:true,review_reason:''}))};}
+      return {items:body.items.map(it=>({id:it.id,translation:'t '+it.id,confidence:90}))};
+    },
+    modelA_generate:async()=>({translation:'x',confidence:90,model:'A'}),
+    modelB_generate:async()=>({translation:'x',confidence:90,model:'B'}),
+  };
+  sandbox.normalizeCVerdict=(r,tA,m)=>({final:r.final||tA,consistency:r.consistency||5,chosen:'A',divergence:r.review_reason||'',detail:{auto_approve:r.auto_approve,decision:r.decision},model:m});
+  sandbox.ruleArbitrate=(tA,tB)=>({final:tA||tB,consistency:10,chosen:'A',divergence:'',model:'rule-based-arbiter'});
+  sandbox.modelC_arbitrate=async(s,tA)=>({final:tA,consistency:9,chosen:'A',divergence:'',detail:{},model:'C'});
+  vm.createContext(sandbox); vm.runInContext(core, sandbox);
+  await sandbox.processTranslationPipeline('t',0,['ja']);
+  // compact: envelope must NOT ask for the heavy 20-field schema
+  const p = cPrompts[0];
+  assert.ok(!/semantic_accuracy|overall_score|source_interpretation/.test(p), 'C batch must request compact fields, not the heavy schema');
+  assert.ok(/final|consistency|decision|auto_approve|review_reason/.test(p), 'compact fields present');
+  // small batches so output cannot blow past the token ceiling
+  assert.ok(cBatchSizes.every(n=>n<=15), 'C batches must be small (<=15), got '+cBatchSizes.join(','));
+  assert.ok(maxTok>=4096, 'C batch should raise max_tokens headroom');
+  assert.equal(DB.results.length,60);
+  assert.ok(DB.results.every(r=>r.modelC==='C'), 'no rule-based fallback when batch succeeds');
+});
+
 test('pipeline C batch with a dropped id falls back to single for that row only', async () => {
   const vm = require('node:vm'); const fs = require('node:fs'); const path = require('node:path');
   const drafts = require('./translation-drafts');
