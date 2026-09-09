@@ -103,3 +103,33 @@ test('retranslateFailed refuses to run twice concurrently for the same task', as
   assert.equal(skipped.length,1,'the concurrent duplicate is refused');
   assert.equal(DB.results.filter(r=>r.targetLang==='pt').length,6,'no duplicate rows');
 });
+
+test('retranslateFailed skips overlong source rows (they jam the loop; leave for human review)', async () => {
+  const short='row', long='x'.repeat(1200);
+  const data = [[short],[long],[short],[long]];
+  // all four are currently bad(no-engine); rows 1,3 are overlong and must be skipped
+  const results = data.map((r,i)=>({id:'b'+i,taskId:'t',rowIndex:i,targetLang:'pt',translation:r[0],modelA:'no-engine-fallback',modelB:'x',modelC:'y',route:'human'}));
+  const DB = {tasks:[{id:'t',data,headers:['s'],columnIndex:0,targetLangs:['pt']}], results};
+  const seenRows=[];
+  const sandbox = baseSandbox({DB,
+    callLLM:async(cfg,prompt)=>{
+      const body=JSON.parse(prompt.slice(prompt.indexOf('{"sharedPrompt"')>=0?prompt.indexOf('{"sharedPrompt"'):prompt.indexOf('{"items"')));
+      if(cfg.model==='C')return {items:body.items.map(it=>({id:it.id,final:'G '+it.id,consistency:9,decision:'select_a',auto_approve:true,review_reason:''}))};
+      body.items.forEach(it=>seenRows.push(it.id));
+      return {items:body.items.map(it=>({id:it.id,translation:'G '+it.id,confidence:95}))};
+    },
+    modelA_generate:async()=>({translation:'G',confidence:95,model:'A'}),
+    modelB_generate:async()=>({translation:'G',confidence:95,model:'B'}),
+  });
+  sandbox.normalizeCVerdict=(r,tA,m)=>({final:r.final||tA,consistency:9,chosen:'A',divergence:'',detail:{},model:m});
+  sandbox.ruleArbitrate=(tA,tB)=>({final:tA||tB,consistency:10,chosen:'A',divergence:'',model:'rule-based-arbiter'});
+  sandbox.modelC_arbitrate=async(s,tA)=>({final:'G',consistency:9,chosen:'A',divergence:'',detail:{},model:'C'});
+  loadCore(sandbox);
+  const summary = await sandbox.retranslateFailed('t');
+  // only the two short rows (0,2) were retranslated; overlong 1,3 skipped
+  assert.ok(seenRows.every(id=>id==='row:0'||id==='row:2'),'overlong rows must not be sent to models, got '+seenRows.join(','));
+  assert.equal(summary.retranslated,2,'only 2 short rows retranslated');
+  assert.ok(summary.skippedLong>=2,'summary reports skipped overlong count');
+  // overlong rows still present (untouched), no duplicates
+  assert.equal(DB.results.filter(r=>r.targetLang==='pt').length,4);
+});

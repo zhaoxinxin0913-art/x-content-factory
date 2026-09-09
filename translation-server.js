@@ -1324,10 +1324,14 @@ async function retranslateFailed(taskId) {
   try {
   const col = task.columnIndex, langs = task.targetLangs || [];
   const valid = []; for (let i = 0; i < task.data.length; i++) { const v = task.data[i][col]; if (v != null && String(v).trim() !== '') valid.push(i); }
-  const summary = { retranslated: 0, byLang: {} };
+  // 超长文案(整段打包的多条文本)单条输出必然超 token 被截断，反复重试卡死补翻循环；
+  // 跳过它们，保留现状进人工复审，让补翻快速处理大量正常短条目。
+  const MAX_SRC = parseInt(process.env.RETRANSLATE_MAX_SRC || '800', 10);
+  const summary = { retranslated: 0, skippedLong: 0, byLang: {} };
   for (const lang of langs) {
     // 需补：缺失 或 现有结果 needsRetranslate
     const rows = valid.filter(i => {
+      if (String(task.data[i][col]).length > MAX_SRC) { summary.skippedLong++; return false; }
       const cur = DB.results.find(r => r.taskId === taskId && r.rowIndex === i && r.targetLang === lang);
       return !cur || needsRetranslate(cur);
     });
