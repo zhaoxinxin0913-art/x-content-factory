@@ -1265,8 +1265,32 @@ async function arbitrateWindow(jobs, lang) {
   return out;
 }
 
+// 纯媒体/文件链接判定（严格口径）：整格就是一条以图片/媒体扩展名结尾的链接或文件路径，
+// 前后无其他文字、无空格分隔。命中者不翻译，原样保留。
+function isPureMediaLink(text) {
+  const s = String(text == null ? '' : text).trim();
+  if (!s) return false;
+  if (/\s/.test(s)) return false;                     // 含空格 → 有说明文字，不算纯链接
+  return /^(https?:\/\/|www\.|\/)?[^\s]+\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|mov|webm|avi|pdf)$/i.test(s);
+}
+
 // 组装单条结果（主流程与补翻共用，保证分档/复核原因逻辑完全一致）
 function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gloss) {
+  // 【媒体链接守卫】原文是纯图片/媒体链接 → 不翻译，原样保留，直接自动通过，跳过所有程序检查与分流
+  if (isPureMediaLink(sourceText)) {
+    return {
+      id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      taskId, rowIndex, sourceText, targetLang: lang,
+      translation: sourceText, translationA: sourceText, translationB: sourceText,
+      chosen: 'A', consistency: 10, divergence: '',
+      validationScore: 10, confidence: 100,
+      route: 'auto', programChecks: [], needsReview: false,
+      reviewReason: '', reviewSeverity: 'low',
+      modelA: 'skip-media-link', modelB: 'skip-media-link', modelC: 'skip-media-link',
+      cDetail: { decision: 'keep_source', reason: '纯媒体/文件链接，规则跳过翻译', auto_approve: true },
+      createdAt: new Date().toISOString()
+    };
+  }
   const prog = programChecks(sourceText, cRes.final, gloss.map, gloss.dntList);
   const route = classifyRoute(cRes, prog, aRes.translation, bRes.translation, sourceText);
   const needsReview = route !== 'auto';
