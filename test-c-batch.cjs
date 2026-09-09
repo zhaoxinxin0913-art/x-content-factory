@@ -137,6 +137,7 @@ test('C batch prompt requests a COMPACT per-item output and small batches to avo
   const p = cPrompts[0];
   assert.ok(!/semantic_accuracy|overall_score|source_interpretation/.test(p), 'C batch must request compact fields, not the heavy schema');
   assert.ok(/final|consistency|decision|auto_approve|review_reason/.test(p), 'compact fields present');
+  assert.ok(/risk_level|error_types/.test(p), 'risk_level and error_types are included (short, for review columns)');
   // small batches so output cannot blow past the token ceiling
   assert.ok(cBatchSizes.every(n=>n<=15), 'C batches must be small (<=15), got '+cBatchSizes.join(','));
   assert.ok(maxTok>=4096, 'C batch should raise max_tokens headroom');
