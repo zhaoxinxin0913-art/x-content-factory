@@ -1364,6 +1364,8 @@ async function retranslateFailed(taskId) {
       console.log(`[Retry] ${lang} 补翻 ${Math.min(start + 100, rows.length)}/${rows.length}`);
     }
   }
+  // 补翻结束：任务已全部翻译完（含替换/补齐），置回 completed，避免卡在 translating 无法导出。
+  task.status = 'completed';
   saveDB();
   return summary;
   } finally {

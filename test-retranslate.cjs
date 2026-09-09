@@ -49,7 +49,7 @@ test('retranslateFailed replaces ONLY bad rows, keeps good ones, no duplicates, 
     {id:'b1',taskId:'t',rowIndex:1,targetLang:'pt',translation:'row 1',modelA:'no-engine-fallback',modelB:'x',modelC:'y',route:'human'},
     {id:'b2',taskId:'t',rowIndex:3,targetLang:'pt',translation:'PT3',modelA:'claude',modelB:'gpt',modelC:'rule-based-arbiter',route:'spot_check'},
   ];
-  const DB = {tasks:[{id:'t',data,headers:['s'],columnIndex:0,targetLangs:['es','pt']}], results};
+  const DB = {tasks:[{id:'t',data,headers:['s'],columnIndex:0,targetLangs:['es','pt'],status:'translating'}], results};
   const sandbox = baseSandbox({DB,
     callLLM:async(cfg,prompt)=>{
       const body=JSON.parse(prompt.slice(prompt.indexOf('{"sharedPrompt"')>=0?prompt.indexOf('{"sharedPrompt"'):prompt.indexOf('{"items"')));
@@ -75,6 +75,7 @@ test('retranslateFailed replaces ONLY bad rows, keeps good ones, no duplicates, 
   assert.equal(pt.length,4,'pt filled to 4 rows');
   assert.ok(pt.every(r=>!sandbox.needsRetranslate(r)),'no bad pt rows remain');
   assert.ok(summary.retranslated>=3, 'summary counts retranslated');
+  assert.equal(DB.tasks[0].status,'completed','补翻结束必须把任务置回 completed，否则网页卡处理中无法导出');
 });
 
 test('retranslateFailed refuses to run twice concurrently for the same task', async () => {
