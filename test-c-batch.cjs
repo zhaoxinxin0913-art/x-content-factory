@@ -144,6 +144,40 @@ test('C batch prompt requests a COMPACT per-item output and small batches to avo
   assert.ok(DB.results.every(r=>r.modelC==='C'), 'no rule-based fallback when batch succeeds');
 });
 
+test('pure media-link rows skip A/B/C entirely and land in auto', async () => {
+  const vm = require('node:vm'); const fs = require('node:fs'); const path = require('node:path');
+  const drafts = require('./translation-drafts');
+  const server = fs.readFileSync(path.join(__dirname,'translation-server.js'),'utf8');
+  const core = server.slice(server.indexOf('const CONCURRENCY ='), server.indexOf('// 启动服务'));
+  const data = [['hello world'],['https://cdn.x.com/a/pic.png'],['photo.jpg'],['充值 %s 金币']];
+  const DB = {tasks:[{id:'t',data,headers:['s'],columnIndex:0,targetLangs:['ja']}], results:[]};
+  const models = Object.fromEntries(['A','B','C'].map(s=>[s,{model:s,prompt:'{sourceText}{targetLang}{glossary}{refs}{transA}{transB}',protocol:'openai',apiKey:'k',baseUrl:'u'}]));
+  const sentToModel=[];
+  const sandbox={console:{log(){},error(){}},process:{env:{}},DB,SETTINGS:{models},...drafts,
+    draftCache:new drafts.DraftCache(),modelConfigured:()=>true,buildGlossary:()=>({map:{},dntList:[]}),
+    langName:x=>x,glossaryToPrompt:()=>'',fillPrompt:(s,v)=>s.replace(/\{(\w+)\}/g,(_,k)=>v[k]),
+    saveDB(){},buildRefs:()=>'',
+    callLLM:async(cfg,prompt)=>{
+      const body=JSON.parse(prompt.slice(prompt.indexOf('{"sharedPrompt"')>=0?prompt.indexOf('{"sharedPrompt"'):prompt.indexOf('{"items"')));
+      body.items.forEach(it=>sentToModel.push(it.sourceText||it.id));
+      if(cfg.model==='C')return {items:body.items.map(it=>({id:it.id,final:'C '+it.id,consistency:9,decision:'select_a',auto_approve:true,review_reason:''}))};
+      return {items:body.items.map(it=>({id:it.id,translation:'T '+it.id,confidence:90}))};
+    },
+    modelA_generate:async(s)=>{sentToModel.push(s);return {translation:'x',confidence:90,model:'A'};},
+    modelB_generate:async(s)=>{sentToModel.push(s);return {translation:'x',confidence:90,model:'B'};},
+  };
+  sandbox.normalizeCVerdict=(r,tA,m)=>({final:r.final||tA,consistency:9,chosen:'A',divergence:'',detail:{},model:m});
+  sandbox.ruleArbitrate=(tA,tB)=>({final:tA||tB,consistency:10,chosen:'A',divergence:'',model:'rule-based-arbiter'});
+  sandbox.modelC_arbitrate=async(s,tA)=>({final:tA,consistency:9,chosen:'A',divergence:'',detail:{},model:'C'});
+  vm.createContext(sandbox); vm.runInContext(core, sandbox);
+  await sandbox.processTranslationPipeline('t',0,['ja']);
+  // media links must NOT be sent to any model
+  assert.ok(!sentToModel.some(x=>String(x).includes('.png')||String(x).includes('.jpg')),'media links must not reach models, saw: '+JSON.stringify(sentToModel));
+  const media = DB.results.filter(r=>/\.(png|jpg)$/.test(r.sourceText));
+  assert.equal(media.length,2,'both media rows produced results');
+  assert.ok(media.every(r=>r.route==='auto' && r.translation===r.sourceText && r.modelA==='skip-media-link'),'media rows: auto + kept source + skip marker');
+});
+
 test('pipeline C batch with a dropped id falls back to single for that row only', async () => {
   const vm = require('node:vm'); const fs = require('node:fs'); const path = require('node:path');
   const drafts = require('./translation-drafts');

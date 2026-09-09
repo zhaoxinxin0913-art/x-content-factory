@@ -1199,16 +1199,24 @@ async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
       column: ci, header: task.headers[ci], value: task.data[rowIndex][ci], type: (task.refTypes || {})[ci]
     }));
     return {id:`row:${rowIndex}`, rowIndex, sourceText, refs, gloss,
+      media: isPureMediaLink(sourceText),   // 纯媒体链接：跳过翻译，不送 A/B/C
       context:{sourceText,targetLang:lang,refs,rawRefs,glossary:gloss,models,
         glossaryData: {glossary:DB.glossary,glossaryML:DB.glossaryML,dnt:DB.dnt}}};
   });
+  // 媒体链接直接给"原样"草稿，不参与 A/B 批量（省 token）；仅正常条目送模型。
+  const mediaJobs = jobs.filter(j => j.media);
+  const realJobs = jobs.filter(j => !j.media);
+  for (const j of mediaJobs) {
+    j.aRes = { translation: j.sourceText, confidence: 100, model: 'skip-media-link' };
+    j.bRes = { translation: j.sourceText, confidence: 100, model: 'skip-media-link' };
+  }
   const run = step => {
     const cfg = models[step];
     const sharedPrompt = fillPrompt(cfg.prompt, {
       targetLang:langName(lang), sourceText:'__ITEM_SOURCE_TEXT__',
       glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:'__ITEM_REFS__'
     });
-    const items = jobs.map(job => ({...job, sharedPrompt, prompt:fillPrompt(cfg.prompt, {
+    const items = realJobs.map(job => ({...job, sharedPrompt, prompt:fillPrompt(cfg.prompt, {
       targetLang:langName(lang), sourceText:job.sourceText,
       glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:job.refs || ''
     })}));
@@ -1217,7 +1225,7 @@ async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
   };
   const [a,b] = await Promise.all([run('A'),run('B')]);
   draftCache.flush();
-  return jobs.map(job => ({...job,aRes:a.get(job.id),bRes:b.get(job.id)}));
+  return jobs.map(job => job.media ? job : ({...job,aRes:a.get(job.id),bRes:b.get(job.id)}));
 }
 
 // C 批量审校：公共审校规则一批只发一次，逐条按 id 返回裁决；缺失/重复/无效/整批失败
@@ -1225,9 +1233,15 @@ async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
 // 程序检查与三档分流仍在 processOne 内逐条执行，不受本函数影响。
 async function arbitrateWindow(jobs, lang) {
   const cfg = { ...SETTINGS.models.C };
+  // 媒体链接不送 C：assembleResult 的守卫会直接产出跳过结果，这里给个占位裁决即可。
+  const out0 = new Map();
+  const mediaJobs = jobs.filter(j => j.media);
+  for (const j of mediaJobs) out0.set(j.id, { final: j.sourceText, consistency: 10, chosen: 'A', divergence: '', model: 'skip-media-link' });
+  jobs = jobs.filter(j => !j.media);
+  if (!jobs.length) return out0;
   if (!modelConfigured(cfg)) {
     // 未配置 C：逐条走规则兜底（零 token）
-    const m = new Map();
+    const m = out0;
     for (const j of jobs) m.set(j.id, ruleArbitrate(j.aRes.translation, j.bRes.translation));
     return m;
   }
@@ -1255,6 +1269,7 @@ async function arbitrateWindow(jobs, lang) {
     }
   });
   const out = new Map();
+  for (const [k, v] of out0) out.set(k, v);
   for (const j of jobs) {
     const v = verdicts.get(j.id);
     // 单条回退 / 规则兜底已含 chosen（已归一化）；批量原始 JSON 无 chosen → 归一化
