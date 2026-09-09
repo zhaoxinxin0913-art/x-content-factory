@@ -381,12 +381,12 @@
       <h2><svg class="ic" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>下载翻译结果</h2>
       <div class="hint">保留原始列，仅在末尾增加译文。黄色单元格需处理，原因紧跟对应语种。</div>
       <div class="footer-actions" style="margin:18px 0;flex-wrap:wrap">
-        <button class="btn btn-primary" id="dlAllMarked">下载全部（高亮＋原因）</button>
-        <button class="btn btn-soft" id="dlApproved">下载通过条目（无需人工复审）</button>
-        <button class="btn btn-soft" id="dlHuman">下载待人工复审（高亮＋原因）</button>
-        <button class="btn btn-soft" id="dlSpot">下载运营抽查（独立副本）</button>
+        <button class="btn btn-primary" id="dlApproved">下载无需复审版</button>
+        <button class="btn btn-soft" id="dlApprovedSpot">下载无需复审（含运营抽查）</button>
+        <button class="btn btn-soft" id="dlHuman">下载人工复审（每语种7列）</button>
+        <button class="btn btn-soft" id="dlSpot">下载运营抽查（每语种7列）</button>
       </div>
-      <div class="hint">通过表包含运营抽查；抽查表仅供核对，不要追加合并。缺失译文会列入人工复审，已有结果沿用平台分档。</div>
+      <div class="hint">复审/抽查表每语种7列：译文·A版·B版·原因·风险等级·问题类型·程序检查，只高亮该语种需处理的译文格。缺失译文（原文非空）会列入人工复审，已有结果沿用平台分档。</div>
       <div class="stat-row" style="grid-template-columns:repeat(3,1fr)">
         <div class="stat"><div class="v" id="exTotal">0</div><div class="l">翻译条目</div></div>
         <div class="stat"><div class="v" id="exReviewed">0</div><div class="l">人工修正</div></div>
@@ -796,8 +796,8 @@ async function downloadClassified(kind, button){
   }catch(e){ toast(e.message,'err'); }
   finally{ button.disabled=false; }
 }
-for(const [id,kind] of [['dlAllMarked','all'],['dlApproved','approved'],['dlHuman','human'],['dlSpot','spot_check']]){
-  $("#"+id).onclick=()=>downloadClassified(kind,$("#"+id));
+for(const [id,kind] of [['dlApproved','approved'],['dlApprovedSpot','approved_spot'],['dlHuman','human'],['dlSpot','spot_check']]){
+  const el=$("#"+id); if(el) el.onclick=()=>downloadClassified(kind,el);
 }
 $('#dlXlsx').onclick=()=>{ window.location='/api/export/'+state.taskId+'?format=xlsx'; toast('开始下载 Excel','ok'); };
 $('#dlCsv').onclick=()=>{ window.location='/api/export/'+state.taskId+'?format=csv'; toast('开始下载 CSV','ok'); };

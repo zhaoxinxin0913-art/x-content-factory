@@ -4,7 +4,7 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { DraftCache, generateDrafts, validDraft, createLimiter, mapBatch } = require('./translation-drafts');
+const { DraftCache, generateDrafts, validDraft, createLimiter, mapBatch, parseLLMJSON } = require('./translation-drafts');
 // Shared across A/B batches, retries, C and concurrent tasks (no batch multiplier).
 const limitLLM = createLimiter(process.env.TRANSLATE_CONCURRENCY || 20);
 const limitFallback = createLimiter(2);
@@ -142,8 +142,7 @@ async function callOpenAIResponses(cfg, prompt, temp) {
     }
   }
   if (!text && data.output_text) text = data.output_text; // 兼容简写字段
-  text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(text);
+  return parseLLMJSON(text);
 }
 
 // OpenAI 兼容：POST {baseUrl}/chat/completions
@@ -156,7 +155,7 @@ async function callOpenAI(cfg, prompt, temp) {
     temperature: temp,
     response_format: { type: 'json_object' }
   });
-  return JSON.parse(response.choices[0].message.content);
+  return parseLLMJSON(response.choices[0].message.content);
 }
 
 // Anthropic Messages API：POST {baseUrl}/v1/messages, 认证 x-api-key
@@ -188,8 +187,7 @@ async function callAnthropic(cfg, prompt, temp, options = {}) {
   }
   const data = await res.json();
   let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
-  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(text);
+  return parseLLMJSON(text);
 }
 
 // 语种映射表（新增语种只需加一行）
