@@ -7,6 +7,8 @@ const https = require('https');
 const { DraftCache, generateDrafts, validDraft, createLimiter, mapBatch, parseLLMJSON } = require('./translation-drafts');
 // Shared across A/B batches, retries, C and concurrent tasks (no batch multiplier).
 const limitLLM = createLimiter(process.env.TRANSLATE_CONCURRENCY || 20);
+// gpt(openai-responses) 扛不住高并发（代理限流返回 429）：单独走低并发池，与 A/C 互不占用。
+const limitSlow = createLimiter(parseInt(process.env.SLOW_CONCURRENCY || '2', 10));
 const limitFallback = createLimiter(2);
 // Hidden directory is not served by express.static; context/credentials are hashed only.
 const draftCache = new DraftCache({ file: path.join(__dirname, '.translation-cache', 'drafts.json') });
@@ -91,7 +93,9 @@ function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, 
 // 工具：调用某个模型（支持 openai / openai-responses / anthropic 三种协议）
 async function callLLM(cfg, prompt, options = {}) {
   cfg = { ...cfg }; // settings endpoint mutates objects: freeze in-flight requests
-  return limitLLM(async () => {
+  // gpt(openai-responses) 走低并发池 limitSlow，避免代理 429；A/C(anthropic) 走 limitLLM。
+  const limit = cfg.protocol === 'openai-responses' ? limitSlow : limitLLM;
+  return limit(async () => {
   const temp = cfg.temperature != null ? cfg.temperature : 0.3;
   if (cfg.protocol === 'anthropic') return callAnthropic(cfg, prompt, temp, options);
   if (cfg.protocol === 'openai-responses') return callOpenAIResponses(cfg, prompt, temp);
