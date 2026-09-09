@@ -384,6 +384,11 @@ function glossaryToPrompt(glossary, verb = '请严格遵守') {
 }
 
 // 模型 A - 翻译第一遍
+function noFallbackResult(sourceText, tag) {
+  // 保留原文占位、置极低置信、模型名标 no-engine-skip → 计入 needsRetranslate，明天可补
+  return { translation: sourceText, confidence: 0, model: `no-engine-skip-${tag}`, skipped: true };
+}
+
 async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '', cfg = { ...SETTINGS.models.A }) {
   console.log(`[Model A] 翻译一: ${sourceText.substring(0, 40)}... → ${targetLang}`);
 
@@ -395,7 +400,8 @@ async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '',
       if (!validDraft(result)) throw new Error('Invalid translator draft response');
       return { translation: result.translation, confidence: result.confidence, model: cfg.model };
     } catch (error) {
-      console.error('[Model A] LLM error, fallback:', error.message);
+      console.error('[Model A] LLM error:', error.message);
+      if (NO_FALLBACK) return noFallbackResult(sourceText, 'A');
     }
   }
   const fb = await fallbackTranslate(sourceText, targetLang);
@@ -416,7 +422,8 @@ async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '',
       if (!validDraft(result)) throw new Error('Invalid translator draft response');
       return { translation: result.translation, confidence: result.confidence, model: cfg.model };
     } catch (error) {
-      console.error('[Model B] LLM error, fallback:', error.message);
+      console.error('[Model B] LLM error:', error.message);
+      if (NO_FALLBACK) return noFallbackResult(sourceText, 'B');
     }
   }
   const fb = await fallbackTranslate(sourceText, targetLang);
@@ -1020,6 +1027,8 @@ app.get('/api/training-samples', (req, res) => {
 
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
 const CONCURRENCY = Math.max(1, parseInt(process.env.TRANSLATE_CONCURRENCY || '20', 10) || 20);
+// 关闭免费引擎兜底：模型失败时不用 MyMemory/Google 充数，标记为未翻译并在整窗失败时熔断。
+const NO_FALLBACK = /^(1|true|yes)$/i.test(process.env.NO_FALLBACK || '');
 
 // ---- 确定性程序检查（优先级高于模型评分：即使C给98分，%s数量错也拦截）----
 function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
@@ -1325,9 +1334,18 @@ function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gl
     cDetail: cRes.detail || null, createdAt: new Date().toISOString()
   };
 }
-// 判定一条结果是否需要补翻：任一模型未调通(原样返回/免费兜底/规则兜底/error)
+// 判定一条结果是否需要补翻：任一模型未调通(原样返回/免费兜底/规则兜底/error/跳过)
 function needsRetranslate(r) {
   return [r.modelA, r.modelB, r.modelC].some(m => /no-engine|fallback|^error$|rule-based-arbiter/.test(String(m || '')));
+}
+// 失败熔断：本窗口刚写入的结果里，若 ≥80% 是模型跳过(no-engine-skip)，说明模型出问题，应中断任务
+function abortIfMassSkip(taskId, jobs, lang) {
+  if (!jobs.length) return false;
+  const ids = new Set(jobs.map(j => j.rowIndex));
+  const rows = DB.results.filter(r => r.taskId === taskId && r.targetLang === lang && ids.has(r.rowIndex));
+  if (!rows.length) return false;
+  const skipped = rows.filter(r => /no-engine-skip/.test(String(r.modelA || '')) || /no-engine-skip/.test(String(r.modelB || ''))).length;
+  return skipped / rows.length >= 0.8;
 }
 // 防止同一任务的补翻被并行触发（重复触发会两个循环互相覆盖、空转烧 token）。
 const retranslateInFlight = new Set();
@@ -1366,6 +1384,13 @@ async function retranslateFailed(taskId) {
       }
       saveDB();
       console.log(`[Retry] ${lang} 补翻 ${Math.min(start + 100, rows.length)}/${rows.length}`);
+      // 【失败熔断】整窗几乎全被模型跳过 → 模型出问题，中断补翻，明天再跑
+      if (NO_FALLBACK && abortIfMassSkip(taskId, jobs, lang)) {
+        console.error(`[Retry] ${lang} 模型连续失败，补翻中断（未用兜底，已翻部分保留）`);
+        summary.aborted = true;
+        saveDB();
+        return summary;
+      }
     }
   }
   // 补翻结束：任务已全部翻译完（含替换/补齐），置回 completed，避免卡在 translating 无法导出。
@@ -1443,6 +1468,13 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
       await Promise.all(Array.from({length:Math.min(conc,jobs.length)},()=>worker()));
       saveDB();
       console.log(`[Pipeline] ${lang} 进度 ${Math.min(start+100,rowIdxs.length)}/${rowIdxs.length}`);
+      // 【失败熔断】整窗几乎全是模型跳过(no-engine-skip) → 模型出问题，中断任务，明天再跑
+      if (NO_FALLBACK && abortIfMassSkip(taskId, jobs, lang)) {
+        console.error(`[Pipeline] ${lang} 模型连续失败，任务 ${taskId} 已中断（未用兜底，明天可补翻）`);
+        task.status = 'aborted';
+        saveDB();
+        return;
+      }
     }
     saveDB();
   }
