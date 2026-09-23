@@ -31,6 +31,7 @@ const DEFAULT_PROMPTS = {
 1. 忠实原意，术语、专有名词、数字、占位符必须与原文严格对应，不可增删或改写
 2. 译文自然、简洁，符合目标语言的产品/UI表达习惯
 3. 严格遵守术语表；有歧义时结合参考信息（其他语言译文、应用场景）判断
+4. 【JSON结构保护】若「源内容」本身是 JSON（以 [ 或 { 开头，如 [{"id":0,"content":"..."}] 或 {"1":"..."}），必须原样保留完整 JSON 结构：所有方括号[]、花括号{}、字段名(如id/content/title)、数字键(如"1")、引号、逗号、冒号、换行都不变，只翻译其中人类可读的文字 value。绝对不能把 JSON 拆成纯文本，否则视为严重错误。emoji、占位符(%s/#nickname#)、百分号(80%)原样保留。
 {glossary}{refs}
 
 源内容：{sourceText}
@@ -43,6 +44,7 @@ const DEFAULT_PROMPTS = {
 1. 忠实原意，术语、专有名词、数字、占位符必须与原文严格对应，不可增删或改写
 2. 译文自然、简洁，符合目标语言的产品/UI表达习惯
 3. 严格遵守术语表；有歧义时结合参考信息（其他语言译文、应用场景）判断
+4. 【JSON结构保护】若「源内容」本身是 JSON（以 [ 或 { 开头，如 [{"id":0,"content":"..."}] 或 {"1":"..."}），必须原样保留完整 JSON 结构：所有方括号[]、花括号{}、字段名(如id/content/title)、数字键(如"1")、引号、逗号、冒号、换行都不变，只翻译其中人类可读的文字 value。绝对不能把 JSON 拆成纯文本，否则视为严重错误。emoji、占位符(%s/#nickname#)、百分号(80%)原样保留。
 {glossary}{refs}
 
 源内容：{sourceText}
@@ -62,6 +64,7 @@ const DEFAULT_PROMPTS = {
 请你：
 1. 先【独立判断】源内容的正确译法（对照原文、其他语言参考、场景说明、术语表），再看 A/B——警惕 A、B 可能犯同一个错误（如都误解了同一个多义词、都漏了术语），此时不要被两者"一致"误导，应以你的独立判断为准
 2. 给出最终译文：选 A 或 B 更准确的一版，或融合，或在两者都错时给出你的正确译法
+   ★【JSON结构硬性要求】若源内容是 JSON（以 [ 或 { 开头），你的 final 必须是结构完全一致的合法 JSON：保留所有 []{}、字段名、数字键、引号、逗号、换行，只翻译文字 value。若 A/B 有一方破坏了 JSON 结构（拆成纯文本/丢字段），必须选保留结构的那一版或自己重构出合法 JSON，绝不能输出被拆散的纯文本。
 3. 一致性评分（1-10）：A、B 两版语义是否一致；若你判断两者都偏离正确含义，即使彼此一致也应给低分并说明
 4. 若有分歧或疑点，简述
 
@@ -88,6 +91,21 @@ function saveSettings() {
 
 // 工具：模型是否已配置（三项齐全才算）
 function modelConfigured(m) { return !!(m && m.baseUrl && m.apiKey && m.model); }
+// 模型ID填写体检：返回警告字符串数组(空=无问题)。防此前踩的坑：
+//   - openai-responses 协议但模型名没带 openai. 前缀(代理 budgeted key 会 422 no pricing)
+//   - 模型名含空格 / 明显是占位符
+function modelIdWarnings(cfg) {
+  const w = [];
+  const proto = String(cfg.protocol || '');
+  const model = String(cfg.model || '').trim();
+  if (!model) return w;
+  if (/\s/.test(model)) w.push('模型名含空格，可能填错');
+  if (proto === 'openai-responses' && /gpt|luna|sol|terra/i.test(model) && !/^openai\./.test(model)) {
+    w.push(`该代理下 gpt 系模型通常需带 "openai." 前缀(如 openai.${model})，否则会 422 no pricing`);
+  }
+  if (/^(your-model|model-name|xxx|todo|placeholder)$/i.test(model)) w.push('模型名疑似占位符');
+  return w;
+}
 // 工具：填充 prompt 占位符
 function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)); }
 // 工具：调用某个模型（支持 openai / openai-responses / anthropic 三种协议）
@@ -616,15 +634,101 @@ app.post('/api/settings/test', async (req, res) => {
     apiKey: (b.apiKey && b.apiKey !== '••••••') ? b.apiKey : stored.apiKey,
     temperature: 0
   };
+  const warnings = modelIdWarnings(cfg);   // 模型ID体检(前缀/空格/占位符)，随结果返回给前端提示
   if (!cfg.baseUrl || !cfg.apiKey || !cfg.model) {
-    return res.json({ success: true, reachable: false, error: '缺少地址/Key/模型名' });
+    return res.json({ success: true, reachable: false, error: '缺少地址/Key/模型名', warnings });
   }
   try {
     const r = await callLLM(cfg, '请回复 JSON：{"ok":true}');
-    res.json({ success: true, reachable: true, sample: r });
+    res.json({ success: true, reachable: true, sample: r, warnings });
   } catch (e) {
-    res.json({ success: true, reachable: false, error: e.message });
+    res.json({ success: true, reachable: false, error: e.message, warnings });
   }
+});
+
+// ---- 预算监控：查代理 budget，返回余额+阈值预警 ----
+// 复用 A/C(anthropic) 的 baseUrl+apiKey 打代理 /budget 接口(与手动排查同一路径)
+app.get('/api/budget', async (req, res) => {
+  try {
+    const m = SETTINGS.models.A && SETTINGS.models.A.protocol === 'anthropic' ? SETTINGS.models.A
+            : (SETTINGS.models.C && SETTINGS.models.C.protocol === 'anthropic' ? SETTINGS.models.C : null);
+    if (!m || !m.baseUrl || !m.apiKey) return res.json({ success: false, error: '无可用 anthropic 代理配置' });
+    const base = String(m.baseUrl).replace(/\/+$/, '').replace(/\/v1$/, '');
+    const url = base + '/budget';
+    const r = await fetchWithTimeout(url, { headers: { 'x-api-key': m.apiKey } }, 10000);
+    if (!r.ok) return res.json({ success: false, error: `HTTP ${r.status}` });
+    const b = await r.json();
+    const total = Number(b.total_budget ?? b.budget ?? b.total ?? 0);
+    const used = Number(b.used_usd ?? b.used ?? b.spent ?? 0);
+    const remaining = total > 0 ? +(total - used).toFixed(2) : Number(b.remaining ?? 0);
+    const pct = total > 0 ? Math.round(used / total * 100) : 0;
+    // 阈值预警：剩余<全额10% 或 剩余绝对值<$20 → 告警
+    const level = (remaining < total * 0.1 || remaining < 20) ? 'critical'
+                : (remaining < total * 0.25 ? 'warning' : 'ok');
+    res.json({ success: true, total, used, remaining, pct, level,
+      reset: b.reset_date || b.reset || null,
+      message: level === 'critical' ? `⚠️ 余额告急：仅剩 $${remaining}，建议暂停或充值`
+             : level === 'warning' ? `余额偏低：剩 $${remaining}` : `余额充足：$${remaining}` });
+  } catch (e) { res.json({ success: false, error: e.message }); }
+});
+
+// ---- 去重：找出 taskId 内重复 key（同key多行，译文可能不同），可选删除只留首条 ----
+// 判重口径：优先按 key 列(header 名含 key)；无则按原文列。核心名 = 括号前主体，忽略空白标点大小写。
+function dedupKeyOf(task, row) {
+  const headers = task.headers || [];
+  let ki = headers.findIndex(h => /^key$/i.test(String(h || '').trim()));
+  if (ki < 0) ki = task.columnIndex != null ? task.columnIndex : 0;
+  const raw = String(row[ki] == null ? '' : row[ki]);
+  return raw.replace(/[（(].*$/, '').replace(/[\s·・.、,，\-]/g, '').toLowerCase();
+}
+app.get('/api/dedup/:taskId', (req, res) => {
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+  const seen = new Map();
+  (task.data || []).forEach((row, i) => {
+    const k = dedupKeyOf(task, row);
+    if (!k) return;
+    (seen.get(k) || seen.set(k, []).get(k)).push(i);
+  });
+  const dups = [...seen.entries()].filter(([, arr]) => arr.length > 1)
+    .map(([k, arr]) => ({ key: k, rows: arr, count: arr.length }));
+  const dupRows = dups.reduce((s, d) => s + d.count - 1, 0);
+  if (req.query.apply === '1') {
+    const drop = new Set();
+    dups.forEach(d => d.rows.slice(1).forEach(i => drop.add(i)));   // 每组保留首条
+    task.data = (task.data || []).filter((_, i) => !drop.has(i));
+    task.rowCount = task.data.length;
+    saveDB();
+    return res.json({ success: true, applied: true, removed: drop.size, remaining: task.data.length });
+  }
+  res.json({ success: true, applied: false, dupGroups: dups.length, dupRows, sample: dups.slice(0, 20) });
+});
+
+// ---- AI 分层复判：把 human 档按原因分层(P1-P5)，规则去误报，返回分层统计 ----
+// 只做只读分析(供前端展示 + 决定要不要跑 opus 复判)，不改数据。
+function rejudgeLayer(r) {
+  const det = (r && r.cDetail) || {};
+  if (Array.isArray(r.programChecks) && r.programChecks.length) return 'P1_程序检查';
+  const detRisk = detectHighRisk(r.sourceText) > 0;
+  if (detRisk || det.risk_level === 'high') return 'P2_高风险';
+  const cons = Number(r.consistency);
+  if (!isNaN(cons) && cons <= 4) return 'P3_一致性低';
+  if (/no-engine|fallback|rule-based|error/.test(String([r.modelA, r.modelB, r.modelC]))) return 'P4_兜底残留';
+  return 'P5_风格分歧';
+}
+app.get('/api/rejudge/:taskId', (req, res) => {
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+  const human = DB.results.filter(r => r.taskId === task.id && r.route === 'human');
+  const layers = {};
+  for (const r of human) {
+    const L = rejudgeLayer(r);
+    (layers[L] = layers[L] || { count: 0, samples: [] });
+    layers[L].count++;
+    if (layers[L].samples.length < 5) layers[L].samples.push({ key: r.rowIndex, lang: r.targetLang, src: String(r.sourceText).slice(0, 60), reason: r.reviewReason });
+  }
+  res.json({ success: true, humanTotal: human.length, layers,
+    note: '分层供AI二次复判参考：P2高风险建议opus精判，P1/P3/P5可haiku并发复判去误报' });
 });
 
 // 上传并解析 Excel/CSV
@@ -653,7 +757,16 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     // 解析表头和数据
     const headers = data[0] || [];
-    const rows = data.slice(1).filter(row => row.some(cell => cell)); // 过滤空行
+    // 列错位根治：sheet_to_json 会截断行尾空单元格，导致后续「原文列/参考列」按索引取值时错位。
+    // 统一把每行补齐到表头长度（缺尾部空单元格补 ''），保证列索引稳定对齐。
+    const width = headers.length;
+    const rows = data.slice(1)
+      .filter(row => row.some(cell => cell !== undefined && cell !== null && String(cell).trim() !== '')) // 过滤全空行
+      .map(row => {
+        const r = Array.isArray(row) ? row.slice() : [];
+        while (r.length < width) r.push('');   // 行尾补齐，防止译文列/参考列错位
+        return r;
+      });
 
     const taskId = `task_${Date.now()}`;
     const task = {
@@ -807,6 +920,84 @@ app.post('/api/review', (req, res) => {
 
   saveDB();
   res.json({ success: true, review });
+});
+
+// ---- AI 批量复核(opus)：对 human/spot 档逐条独立复核，产出最终译文写入 reviews(decision='fix') ----
+// 复核引擎复用已配置的 anthropic 协议模型(优先C，退A)的地址+Key，模型名换成 opus。
+const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'claude-opus-4-8';
+const aiReviewJobs = {}; // taskId -> 进度对象
+function reviewModelCfg() {
+  const pick = k => { const m = SETTINGS.models[k]; return (m && m.protocol === 'anthropic' && modelConfigured(m)) ? m : null; };
+  const c = pick('C') || pick('A');
+  if (!c) return null;
+  return { protocol: 'anthropic', baseUrl: c.baseUrl, apiKey: c.apiKey, model: AI_REVIEW_MODEL, temperature: 0.3 };
+}
+function buildAiReviewPrompt(r, lname, refs) {
+  return `你是资深本地化QA复核专家。两个模型(A/B)独立翻译了同一内容，模型C给了最终版。请你独立复核，产出最佳的最终译文。
+
+【铁律】
+- 若原文是 JSON(以 [ 或 { 开头，如 [{"id":0,"content":"..."}] 或 {"1":"..."})：输出必须是结构完全一致的合法 JSON，保留所有 []{}、字段名、数字键、引号、逗号、冒号、换行，只翻译其中人类可读的文字 value。绝对不能拆成纯文本。
+- 占位符(%s、%1$s、#nickname#、#rank#、\\n)原样保留，位置形式 %1$s/%2$s 在语序需要时可用。
+- emoji、数字、百分号(80%)原样保留。
+- 译文自然地道，符合 ${lname} 的产品/UI 表达习惯。
+
+原文：${r.sourceText}${refs || ''}
+候选A：${r.translationA || ''}
+候选B：${r.translationB || ''}
+候选C(当前最终)：${r.translation || ''}
+被标记原因：${(r.reviewReason || r.divergence || '').slice(0, 200)}
+
+只返回 JSON：{"final":"复核后的最终译文(原文是JSON则填结构一致的合法JSON字符串)"}`;
+}
+async function runAiReview(task, targets, cfg, job) {
+  const conc = Math.min(3, targets.length) || 1;
+  let idx = 0;
+  async function worker() {
+    while (idx < targets.length) {
+      const r = targets[idx++];
+      try {
+        const row = task.data[r.rowIndex] || [];
+        const out = await callLLM(cfg, buildAiReviewPrompt(r, langName(r.targetLang), buildRefs(task, row)), { maxTokens: 4096 });
+        let final = (out && (out.final || out.final_translation)) || '';
+        if (!final) { job.failed++; continue; }
+        final = String(final);
+        const srcT = String(r.sourceText || '').trim();
+        if (srcT.startsWith('[') || srcT.startsWith('{')) {          // 原文JSON → 校验译文合法，非法则不采用留人工
+          try { JSON.parse(final); job.jsonFixed++; } catch { job.failed++; continue; }
+        }
+        if (!DB.reviews.find(rv => rv.resultId === r.id)) {          // 幂等：不重复写
+          DB.reviews.push({ id: `review_ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            taskId: task.id, resultId: r.id, decision: 'fix', finalText: final,
+            reviewer: 'ai-opus', reviewTime: new Date().toISOString() });
+          job.fixed++;
+        }
+      } catch (e) { job.failed++; }
+      finally { job.done++; if (job.done % 10 === 0) saveDB(); }
+    }
+  }
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  saveDB();
+  job.status = 'done'; job.finishedAt = Date.now();
+}
+// 启动 AI 复核(后台跑，立即返回)。?route=human(默认)|spot_check|all
+app.post('/api/ai-review/:taskId', (req, res) => {
+  const task = DB.tasks.find(t => t.id === req.params.taskId);
+  if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+  const cfg = reviewModelCfg();
+  if (!cfg) return res.json({ success: false, error: '需先配置 anthropic 协议模型(A或C)作为复核引擎' });
+  const ex = aiReviewJobs[task.id];
+  if (ex && ex.status === 'running') return res.json({ success: true, already: true, job: ex });
+  const route = req.query.route || 'human';
+  const targets = DB.results.filter(r => r.taskId === task.id && r.needsReview
+    && !DB.reviews.find(rv => rv.resultId === r.id)
+    && (route === 'all' ? (r.route === 'human' || r.route === 'spot_check') : r.route === route));
+  const job = aiReviewJobs[task.id] = { status: 'running', total: targets.length, done: 0, fixed: 0, jsonFixed: 0, failed: 0, model: cfg.model, route, startedAt: Date.now() };
+  res.json({ success: true, started: true, job });
+  runAiReview(task, targets, cfg, job).catch(e => { job.status = 'error'; job.error = e.message; });
+});
+// 查询 AI 复核进度
+app.get('/api/ai-review/:taskId', (req, res) => {
+  res.json({ success: true, job: aiReviewJobs[req.params.taskId] || null });
 });
 
 // 分类导出只读快照，不改变任务、模型、译文或人工复核记录。
@@ -1039,8 +1230,11 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   // 1. 译文非空
   if (!out.trim()) issues.push('译文为空');
   // 2. 占位符集合一致（%s %d %1$s {name} {{var}} #num# #Username# 等）
+  //    位置占位符 %1$s/%2$s 视为等价于位置无关的 %s —— 目标语常因语序调整而使用位置形式，
+  //    这是正确本地化，不应误判(此前 id=5343 日语 %s→%1$s 被误报)。
   const phRe = /%\d*\$?[sd]|\{\{?\w+\}?\}|#\w+#/g;
-  const norm = arr => (arr || []).map(x => x.replace(/^\{+|\}+$/g, '')).sort().join(',');
+  const canon = x => x.replace(/^\{+|\}+$/g, '').replace(/^%\d+\$([sd])$/, '%$1'); // %1$s→%s, %2$d→%d
+  const norm = arr => (arr || []).map(canon).sort().join(',');
   const srcPh = src.match(phRe) || [], outPh = out.match(phRe) || [];
   if (srcPh.length !== outPh.length) issues.push(`占位符数量不符(原文${srcPh.length}/译文${outPh.length})`);
   else if (norm(srcPh) !== norm(outPh)) issues.push('占位符类型/名称不一致');
@@ -1091,7 +1285,38 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   }
   // 9. 译文含乱码替换符(U+FFFD)通常是编码损坏
   if (/\uFFFD/.test(out)) issues.push('译文含乱码字符(编码损坏)');
+  // 10. JSON结构保护：原文是合法JSON(数组/对象)时，译文必须也是合法JSON且结构骨架一致
+  //     (键名/数组长度/嵌套形状不变，只翻译value)。这是批量翻译最易破坏的点，硬性拦截。
+  const jc = jsonStructCheck(src, out);
+  if (jc) issues.push(jc);
   return { pass: issues.length === 0, issues };
+}
+
+// 判断字符串是否 JSON 结构文本(以 [ 或 { 开头结尾)，并尝试解析
+function tryParseJson(s) {
+  const t = String(s || '').trim();
+  if (!(t.startsWith('[') || t.startsWith('{'))) return { isJson: false };
+  try { return { isJson: true, ok: true, val: JSON.parse(t) }; }
+  catch { return { isJson: true, ok: false }; }
+}
+// 提取JSON的"结构骨架"：对象记录排序后的键集合，数组记录长度，递归；忽略所有字符串value内容
+function jsonSkeleton(v) {
+  if (Array.isArray(v)) return 'A' + v.length + '[' + v.map(jsonSkeleton).join(',') + ']';
+  if (v && typeof v === 'object') {
+    const keys = Object.keys(v).sort();
+    return 'O{' + keys.map(k => k + ':' + jsonSkeleton(v[k])).join(',') + '}';
+  }
+  return typeof v === 'number' ? 'N' : (typeof v === 'boolean' ? 'B' : 'S'); // 标量类型，字符串一律S
+}
+// 返回错误描述(字符串)或 null(通过/不适用)
+function jsonStructCheck(src, out) {
+  const s = tryParseJson(src);
+  if (!s.isJson || !s.ok) return null;                 // 原文不是JSON，或原文本身就非法 → 不检查
+  const o = tryParseJson(out);
+  if (!o.isJson) return 'JSON结构被破坏(译文丢失JSON格式,应保留[]{}和字段名,只译value)';
+  if (!o.ok) return 'JSON结构非法(译文无法解析,可能引号/括号/逗号被破坏)';
+  if (jsonSkeleton(s.val) !== jsonSkeleton(o.val)) return 'JSON结构骨架不一致(键名/数组长度/嵌套被改动)';
+  return null;
 }
 
 // ---- 确定性高危内容识别（借鉴 localize-anything/risk_classifier 思想，适配中英混合社交App场景）----
@@ -1488,7 +1713,12 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
 // 启动服务
 // ============================================================
 
-app.listen(PORT, () => {
+// 测试可见：被 require 时导出纯函数供单测，直接运行时才启动服务
+if (require.main !== module) {
+  module.exports = { programChecks, jsonStructCheck, jsonSkeleton, tryParseJson, detectHighRisk, isPureMediaLink };
+}
+
+if (require.main === module) app.listen(PORT, () => {
   console.log('');
   console.log('🌍 AI 翻译流水线平台启动成功！');
   console.log('================================');

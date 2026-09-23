@@ -361,11 +361,13 @@
             <option value="">全部待复核</option>
           </select>
           <select id="reviewLangFilter" class="btn btn-soft" style="font-size:13px;padding:6px 10px;cursor:pointer"><option value="">全部语种</option></select>
+          <button class="btn btn-primary" id="aiReviewBtn" style="font-size:13px"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 7.4H22l-6 4.4 2.3 7.2L12 16.6 5.7 21l2.3-7.2-6-4.4h7.6z"/></svg>AI 复核(opus)</button>
           <button class="btn btn-soft" id="exportReviewXlsx" style="font-size:13px"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>导出待复核(Excel)</button>
           <button class="btn btn-soft" id="exportReviewCsv" style="font-size:13px">CSV</button>
         </span>
       </h2>
-      <div class="hint">默认只显示 <b style="color:#d9534f">🔴 人工必审</b>（真分歧/高风险）。<b style="color:#c8951a">🟡 运营抽查</b>（A/B一致但含敏感词等，大概率没问题）可在左上切换查看。修正框留空则采用建议。</div>
+      <div class="hint">默认只显示 <b style="color:#d9534f">🔴 人工必审</b>（真分歧/高风险）。<b style="color:#c8951a">🟡 运营抽查</b>（A/B一致但含敏感词等，大概率没问题）可在左上切换查看。修正框留空则采用建议。<b style="color:var(--brand)">AI 复核(opus)</b> 会用 opus 逐条独立复核当前档位的全部待复核条目，产出最终译文并直接写回，跑完可直接去导出。</div>
+      <div id="aiReviewProgress" class="hidden" style="margin:10px 0;padding:12px 14px;border-radius:12px;background:#f0f7f4;border:1px solid #cfe8dd;font-size:13px;color:var(--ink2)"></div>
       <div id="reviewList"></div>
     </div>
     <div class="footer-actions">
@@ -770,6 +772,54 @@ $('#toExportBtn').onclick=async()=>{ await loadExportStats(); showView(5); };
 // 导出待复核条目(发给同事)
 $('#exportReviewXlsx').onclick=()=>{ if(!state.taskId){toast('请先完成翻译','err');return;} window.location='/api/export-review/'+state.taskId+'?format=xlsx'; toast('开始下载待复核条目','ok'); };
 $('#exportReviewCsv').onclick=()=>{ if(!state.taskId){toast('请先完成翻译','err');return;} window.location='/api/export-review/'+state.taskId+'?format=csv'; toast('开始下载待复核条目(CSV)','ok'); };
+
+// ---- AI 复核(opus)：对当前档位待复核条目逐条独立复核，写回最终译文 ----
+let aiReviewPoll=null;
+function renderAiReviewProg(job){
+  const box=$('#aiReviewProgress');
+  if(!job){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const routeLabel={human:'人工必审',spot_check:'运营抽查',all:'全部待复核'}[job.route]||job.route;
+  if(job.status==='running'){
+    const pct=job.total?Math.round(job.done/job.total*100):0;
+    box.innerHTML=`⏳ <b>AI 复核中(${job.model})</b> · ${routeLabel} · ${job.done}/${job.total} (${pct}%) · 已修正 ${job.fixed}${job.failed?` · 失败 ${job.failed}`:''}`;
+  }else if(job.status==='done'){
+    box.innerHTML=`✅ <b>AI 复核完成</b> · ${routeLabel} · 共 ${job.total} 条，写回最终译文 ${job.fixed} 条${job.jsonFixed?`（含JSON ${job.jsonFixed}）`:''}${job.failed?` · ${job.failed} 条未采用(留人工)`:''}。可直接「完成复核，前往导出」。`;
+  }else if(job.status==='error'){
+    box.innerHTML=`❌ AI 复核出错：${esc(job.error||'未知错误')}`;
+  }
+}
+async function pollAiReview(){
+  try{
+    const r=await fetch('/api/ai-review/'+state.taskId).then(x=>x.json());
+    renderAiReviewProg(r.job);
+    if(r.job&&r.job.status==='running') return;
+    clearInterval(aiReviewPoll); aiReviewPoll=null;
+    $('#aiReviewBtn').disabled=false;
+    if(r.job&&r.job.status==='done'){
+      const res=await fetch('/api/task/'+state.taskId).then(x=>x.json());   // 拉最新results/reviews刷新队列
+      state.results=res.results; state.reviews=res.reviews;
+      buildReview();
+      toast(`AI 复核完成，写回 ${r.job.fixed} 条`,'ok');
+    }
+  }catch(e){}
+}
+$('#aiReviewBtn').onclick=async()=>{
+  if(!state.taskId){ toast('请先完成翻译','err'); return; }
+  const route=$('#reviewRouteFilter').value||'human';
+  const open=state.results.filter(r=>r.needsReview&&!state.reviews.find(rv=>rv.resultId===r.id)&&(route?r.route===route:true));
+  if(!open.length){ toast('当前档位没有待复核条目','err'); return; }
+  const routeLabel={human:'人工必审',spot_check:'运营抽查','':'全部待复核'}[route]||route;
+  if(!confirm(`将用 opus 逐条独立复核【${routeLabel}】档 ${open.length} 条，产出最终译文并写回（可再人工微调）。开始？`)) return;
+  const btn=$('#aiReviewBtn'); btn.disabled=true;
+  try{
+    const r=await fetch('/api/ai-review/'+state.taskId+'?route='+(route||'human'),{method:'POST'}).then(x=>x.json());
+    if(!r.success){ toast(r.error||'启动失败','err'); btn.disabled=false; return; }
+    renderAiReviewProg(r.job||{status:'running',total:open.length,done:0,fixed:0,route:route||'human',model:'opus'});
+    if(aiReviewPoll) clearInterval(aiReviewPoll);
+    aiReviewPoll=setInterval(pollAiReview,2000);
+  }catch(e){ toast('启动失败：'+e.message,'err'); btn.disabled=false; }
+};
 
 // ---- export ----
 async function loadExportStats(){

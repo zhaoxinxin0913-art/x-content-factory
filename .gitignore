@@ -13,3 +13,7 @@ translation-settings.json
 .translation-cache/
 hermes-verify-*.js
 .hermes-verify-*.js
+# 备份/临时/复判快照
+*.bak-*
+rejudge-verdicts.json
+.hermes/
