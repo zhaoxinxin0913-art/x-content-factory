@@ -1,4 +1,6 @@
 const http=require('http'),fs=require('fs'),path=require('path'),puppeteer=require('puppeteer');
+// Chrome 可执行文件路径
+const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 // 加载环境变量
 if(fs.existsSync(path.join(__dirname,'.env'))){
   fs.readFileSync(path.join(__dirname,'.env'),'utf8').split('\n').forEach(line=>{
@@ -118,7 +120,7 @@ function analyzeStyle(posts){
 
 // ============================================================
 async function scrapeX(url,token,maxCount){
-  const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
+  const b=await puppeteer.launch({executablePath:CHROME_PATH,headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
   const p=await b.newPage();await p.setViewport({width:1280,height:900});
   await p.setExtraHTTPHeaders({'Accept-Language':'en-US,en;q=0.9'});
   await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:15000});
@@ -190,7 +192,7 @@ ${css}</style></head><body>${cards}
 
 async function screenshotCards(jobDir){
   const cp=path.join(jobDir,'cards_full.html'),id=path.join(jobDir,'imgs');fs.existsSync(id)||fs.mkdirSync(id,{recursive:true});
-  const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']}),p=await b.newPage();
+  const b=await puppeteer.launch({executablePath:CHROME_PATH,headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']}),p=await b.newPage();
   await p.setViewport({width:1200,height:900});await p.goto(`file://${cp}`,{waitUntil:'networkidle0',timeout:30000});
   await p.evaluate(()=>document.fonts.ready);
   const cards=await p.$$('.card');
@@ -614,7 +616,7 @@ runMedia = async function() {
 // 媒体搬运模块
 // ============================================================
 async function scrapePost(postUrl,token){
-  const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
+  const b=await puppeteer.launch({executablePath:CHROME_PATH,headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
   try {
     const p=await b.newPage();await p.setViewport({width:1280,height:900});
     await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
@@ -988,4 +990,4 @@ function startMonitorTimer(config){
 const monConfigPath=path.join(OUTPUT,'_monitor.json');
 if(fs.existsSync(monConfigPath)){try{startMonitorTimer(JSON.parse(fs.readFileSync(monConfigPath,'utf8')))}catch(e){}}
 
-server.listen(PORT,async()=>{console.log(`\n🏭 X内容工厂 → http://localhost:${PORT}\n`);try{const b=await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']});await b.close();console.log('✅ Puppeteer 就绪\n')}catch(e){console.log('⚠️ Puppeteer 预热失败(将在请求时重试):',e.message,'\n')}});
+server.listen(PORT,async()=>{console.log(`\n🏭 X内容工厂 → http://localhost:${PORT}\n`);try{const b=await puppeteer.launch({executablePath:CHROME_PATH,headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage']});await b.close();console.log('✅ Puppeteer 就绪\n')}catch(e){console.log('⚠️ Puppeteer 预热失败(将在请求时重试):',e.message,'\n')}});

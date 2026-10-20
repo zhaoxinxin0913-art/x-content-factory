@@ -102,13 +102,15 @@ async function runBatchMedia() {
         html += '<a href="' + item.postUrl + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none">🔗 原帖</a>';
         if (item.imagePaths && item.imagePaths.length > 0) {
           item.imagePaths.forEach(function(p, i) {
+            // p 格式是 'media/img_01.jpg'，需要直接拼接到 outputDir
             const url = '/output/_media/' + item.handle + '_' + item.tweetId + '/' + p;
-            html += '<a href="' + url + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none">📷 图' + (i+1) + '</a>';
+            html += '<a href="' + url + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none" download>📷 图' + (i+1) + '</a>';
           });
         }
         if (item.videoPath) {
+          // videoPath 格式是 'media/video.mp4'
           const vurl = '/output/_media/' + item.handle + '_' + item.tweetId + '/' + item.videoPath;
-          html += '<a href="' + vurl + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none">🎬 视频</a>';
+          html += '<a href="' + vurl + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none" download>🎬 视频</a>';
         }
         html += '</div></div>';
       });
