@@ -135,7 +135,14 @@ async function scrapeX(url,token,maxCount){
         if(!t||f.some(x=>x.text===t))return;
         const link=a.querySelector('a[href*="/status/"]');
         const href=link?link.getAttribute('href'):'';
-        f.push({text:t,date:(a.querySelector('time')?.getAttribute('datetime')||'').split('T')[0],aria:a.querySelector('[role="group"]')?.getAttribute('aria-label')||'',href});
+        // 提取媒体信息
+        const imgs=[];
+        a.querySelectorAll('img[src*="pbs.twimg.com/media"]').forEach(img=>{
+          const src=img.src;
+          if(src&&!src.includes('profile_images'))imgs.push(src);
+        });
+        const hasVideo=!!a.querySelector('video') || !!a.querySelector('[data-testid="videoPlayer"]');
+        f.push({text:t,date:(a.querySelector('time')?.getAttribute('datetime')||'').split('T')[0],aria:a.querySelector('[role="group"]')?.getAttribute('aria-label')||'',href,images:imgs,hasVideo});
       });return f;
     });
     np.filter(x=>isGoodPost(x.text)).forEach(x=>{const k=x.text.substring(0,50);if(!posts.has(k))posts.set(k,x)});
@@ -143,7 +150,7 @@ async function scrapeX(url,token,maxCount){
     await p.evaluate(()=>window.scrollBy(0,3000));await new Promise(r=>setTimeout(r,1200));
   }
   await b.close();
-  const postList=[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:'',comments:[]}));
+  const postList=[...posts.values()].slice(0,maxCount).map(x=>({q:x.text.trim().replace(/\n+/g,' '),date:x.date,aria:x.aria,tags:tagText(x.text),cn:basicCN(x.text),link:x.href?`https://x.com${x.href}`:'',comments:[],images:x.images||[],hasVideo:x.hasVideo||false}));
   return{handle,posts:postList};
 }
 
@@ -200,6 +207,24 @@ function genPreview(jobDir,handle,posts){
     const imgCredit = hasRealImage ? `<a href="${p.imageSearch.images[0].authorUrl}" target="_blank" style="font-size:10px;color:#999;text-decoration:none">📷 ${p.imageSearch.images[0].author}</a>` : '';
     const imgDownload = hasRealImage ? p.imageSearch.images[0].downloadUrl : `/api/download/${handle}/imgs/card_${n}.png`;
     
+    // 从X抓取的媒体附件
+    const hasXMedia = (p.images && p.images.length > 0) || p.hasVideo;
+    let xMediaHTML = '';
+    if(hasXMedia){
+      xMediaHTML += '<div style="margin-top:8px;padding:8px;background:#f0f8ff;border-radius:6px;border:1px solid #d0e8ff">';
+      xMediaHTML += '<div style="font-size:11px;color:#1d9bf0;font-weight:600;margin-bottom:4px">📎 帖子附件:</div>';
+      if(p.images && p.images.length > 0){
+        xMediaHTML += `<div style="font-size:11px;color:#666">${p.images.length} 张图片</div>`;
+        p.images.forEach((img,idx)=>{
+          xMediaHTML += `<a href="${img}" target="_blank" style="font-size:11px;color:#1d9bf0;margin-right:8px">图${idx+1}</a>`;
+        });
+      }
+      if(p.hasVideo){
+        xMediaHTML += `<div style="font-size:11px;color:#666;margin-top:4px">🎬 含视频</div>`;
+      }
+      xMediaHTML += '</div>';
+    }
+    
     blocks+=`<div class="post" id="post${i}">
   <div style="position:relative;width:200px;flex-shrink:0">
     <img src="${imgSrc}" style="width:200px;height:267px;object-fit:cover;border-radius:8px 0 0 8px" onerror="this.src='imgs/card_${n}.png'">
@@ -208,7 +233,7 @@ function genPreview(jobDir,handle,posts){
   <div class="body">
     <div class="th">🇹🇭 ${p.q}</div>
     <div class="cn">🇨🇳 ${p.cn||'—'}</div>
-    ${hasRealImage?`<div style="font-size:11px;color:#999;margin:4px 0">🔍 关键词: ${p.imageSearch.query}</div>`:''}\n    ${p.comments&&p.comments.length?`<div class="cmts"><div class="cmts-title">💬 热门评论</div>${p.comments.map(c=>`<div class="cmt"><span class="cmt-text">${c.text.replace(/\n/g,' ').substring(0,100)}</span><span class="cmt-likes">❤️${c.likes}</span></div>`).join('')}</div>`:''}\n    <div class="aria">${p.aria}</div>
+    ${hasRealImage?`<div style="font-size:11px;color:#999;margin:4px 0">🔍 关键词: ${p.imageSearch.query}</div>`:''}\n    ${xMediaHTML}\n    ${p.comments&&p.comments.length?`<div class="cmts"><div class="cmts-title">💬 热门评论</div>${p.comments.map(c=>`<div class="cmt"><span class="cmt-text">${c.text.replace(/\n/g,' ').substring(0,100)}</span><span class="cmt-likes">❤️${c.likes}</span></div>`).join('')}</div>`:''}\n    <div class="aria">${p.aria}</div>
     <div class="tags">${p.tags.split(' ').map(t=>`<span class="t">${t}</span>`).join('')}</div>
     <div class="actions">
       <a class="dl" href="${imgDownload}" target="_blank">⬇️ 图片</a>
