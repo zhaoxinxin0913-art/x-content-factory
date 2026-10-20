@@ -10,6 +10,7 @@ const PORT=5050,OUTPUT=path.join(__dirname,'output');
 fs.existsSync(OUTPUT)||fs.mkdirSync(OUTPUT);
 const{uploadToFeishu}=require('./feishu.js');
 const{searchImagesForPosts}=require('./image-search.js');
+const handleBatchMedia=require('./batch-media-handler.js');
 
 // ============================================================
 const STYLES=[{cls:'s1',css:'background:#fafafa',txt:'color:#333'},
@@ -376,8 +377,18 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 <div id="tab-media" style="display:none">
 <div class="box">
   <h2 data-i18n="mediaTitle">🎬 媒体搬运</h2>
-  <p class="dsc" data-i18n="mediaDesc">输入单条帖子链接，提取文案、图片/视频、优质评论</p>
-  <input class="inp" id="murl" data-ph="phMediaUrl" placeholder="https://x.com/用户名/status/帖子ID">
+  <p class="dsc" data-i18n="mediaDesc">输入单条或多条帖子链接，提取文案、图片/视频、优质评论</p>
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <button class="btn" style="width:auto;padding:8px 16px;background:#000;color:#fff;font-size:12px" onclick="switchMediaMode('single')" id="modeSingle">单条</button>
+    <button class="btn" style="width:auto;padding:8px 16px;background:#fff;color:#000;border:1.5px solid #000;font-size:12px" onclick="switchMediaMode('batch')" id="modeBatch">批量 (最多10条)</button>
+  </div>
+  <div id="single-mode">
+    <input class="inp" id="murl" data-ph="phMediaUrl" placeholder="https://x.com/用户名/status/帖子ID">
+  </div>
+  <div id="batch-mode" style="display:none">
+    <textarea class="inp" id="burls" rows="8" style="resize:vertical;font-family:monospace;font-size:12px" placeholder="每行一个链接，最多10条，例如：&#10;https://x.com/user1/status/123&#10;https://x.com/user2/status/456&#10;https://x.com/user3/status/789"></textarea>
+    <p style="font-size:11px;color:#999;margin:4px 0">💡 支持同时处理多个帖子，自动并发下载</p>
+  </div>
   <h2 style="margin-top:14px" data-i18n="lblToken2">🔐 Auth Token</h2>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <input class="inp" id="mtoken" data-ph="phToken" placeholder="粘贴 auth_token" style="flex:1;margin-bottom:0">
@@ -585,7 +596,19 @@ function copyTableToClipboard(){
   }
   window.getSelection().removeAllRanges();
 }
-</script></body></html>`;
+</script>
+<script src="/batch-media.js"></script>
+<script>
+// 修改runMedia函数支持批量模式
+const originalRunMedia = runMedia;
+runMedia = async function() {
+  if (window.currentMediaMode && window.currentMediaMode() === 'batch') {
+    return window.runBatchMedia();
+  }
+  return originalRunMedia();
+};
+</script>
+</body></html>`;
 
 // ============================================================
 // 媒体搬运模块
@@ -740,6 +763,7 @@ const server=http.createServer(async(req,res)=>{
   if(u.pathname==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(INDEX);return}
   if(u.pathname==='/get-token'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'get-token.html')));return}
   if(u.pathname==='/get-token-en'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'get-token-en.html')));return}
+  if(u.pathname==='/batch-media.js'){res.writeHead(200,{'Content-Type':'application/javascript'});res.end(fs.readFileSync(path.join(__dirname,'public','batch-media.js')));return}
   if(u.pathname==='/api/run'&&req.method==='POST'){
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
       try{
@@ -850,6 +874,20 @@ const server=http.createServer(async(req,res)=>{
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify(responseData));
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
+    });return;
+  }
+  // 批量媒体搬运 API
+  if(u.pathname==='/api/batch-media'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
+      try{
+        const result=await handleBatchMedia(body,OUTPUT,downloadMedia,translateText);
+        res.writeHead(result.error?400:200,{'Content-Type':'application/json'});
+        res.end(JSON.stringify(result));
+      }catch(e){
+        console.error('批量处理异常:',e);
+        res.writeHead(500,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:e.message}));
+      }
     });return;
   }
   // 监控 API
