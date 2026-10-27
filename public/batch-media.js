@@ -95,11 +95,11 @@ async function runBatchMedia() {
       html += '<h4 style="margin:20px 0 10px 0">📋 提取结果</h4>';
       d.results.forEach(function(item, idx) {
         html += '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:12px">';
-        html += '<div style="font-size:11px;color:#999;margin-bottom:6px">#' + (idx+1) + ' - ' + item.category + '</div>';
-        html += '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.5">' + (item.cnText || item.text) + '</div>';
-        html += '<div style="font-size:12px;color:#666;margin-bottom:8px">📎 ' + item.images + ' 图片' + (item.video ? ' + 视频' : '') + '</div>';
+        html += '<div style="font-size:11px;color:#999;margin-bottom:6px">#' + (idx+1) + ' - ' + (item.category || 'General') + '</div>';
+        html += '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.5">' + (item.cnText || item.text || '[无文本]') + '</div>';
+        html += '<div style="font-size:12px;color:#666;margin-bottom:8px">📎 ' + (item.images || 0) + ' 图片' + (item.video ? ' + 视频' : '') + '</div>';
         html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
-        html += '<a href="' + item.postUrl + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none">🔗 原帖</a>';
+        html += '<a href="' + (item.postUrl || '#') + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none">🔗 原帖</a>';
         if (item.imagePaths && item.imagePaths.length > 0) {
           item.imagePaths.forEach(function(p, i) {
             // p 格式是 'media/img_01.jpg'，需要直接拼接到 outputDir
