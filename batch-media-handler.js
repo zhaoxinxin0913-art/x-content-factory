@@ -37,20 +37,23 @@ module.exports = async function handleBatchMedia(body, OUTPUT, downloadMedia, tr
       new Promise((_, rj) => setTimeout(() => rj(new Error('超时120秒')), 120000))
     ]);
     
-    // 翻译
-    let cnText = result.post.text;
-    try {
-      cnText = await Promise.race([
-        translateText(result.post.text),
-        new Promise(resolve => setTimeout(() => resolve(result.post.text), 5000))
-      ]);
-      if (!cnText || cnText.length < 5) cnText = result.post.text;
-    } catch (e) {
-      console.error(`翻译失败 [${idx + 1}]:`, e.message);
+    // 翻译（添加防御性检查）
+    let cnText = result.post.text || '';
+    if (cnText && cnText.length > 0) {
+      try {
+        cnText = await Promise.race([
+          translateText(result.post.text),
+          new Promise(resolve => setTimeout(() => resolve(result.post.text), 5000))
+        ]);
+        if (!cnText || cnText.length < 5) cnText = result.post.text;
+      } catch (e) {
+        console.error(`翻译失败 [${idx + 1}]:`, e.message);
+        cnText = result.post.text;
+      }
     }
     
-    // 分类
-    const text = result.post.text.toLowerCase();
+    // 分类（添加防御性检查）
+    const text = (result.post.text || '').toLowerCase();
     let category = 'General';
     if (text.match(/celebrity|star|famous|idol|演员|明星|นักแสดง|artis/i)) category = 'Celebrity';
     else if (text.match(/love|relationship|boyfriend|girlfriend|couple|แฟน|ความรัก|pacar|cinta/i)) category = 'Relationship';
@@ -60,7 +63,7 @@ module.exports = async function handleBatchMedia(body, OUTPUT, downloadMedia, tr
     else if (text.match(/travel|trip|vacation|ท่องเที่ยว|wisata/i)) category = 'Travel';
     
     const cnTags = ['#' + category];
-    const origTags = result.post.text.match(/#[\w\u0E00-\u0E7F]+/g) || [];
+    const origTags = (result.post.text || '').match(/#[\w\u0E00-\u0E7F]+/g) || [];
     if (category === 'Relationship') cnTags.push('#情感');
     if (category === 'MEME') cnTags.push('#搞笑');
     if (category === 'Food') cnTags.push('#美食');
