@@ -372,6 +372,10 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <details><summary data-i18n="howTo">📖 怎么获取？</summary>
   <div data-i18n="howToDetail">1. 打开 x.com 并登录<br>2. ⌘+Option+I → Application → Cookies → x.com<br>3. 找到 auth_token → 双击 Value 复制</div></details>
   <div class="range-wrap"><label><span data-i18n="lblCount">数量</span><span id="cnt">30</span></label><input type="range" id="count" min="10" max="100" value="30" oninput="document.getElementById('cnt').textContent=this.value"></div>
+  <div style="margin:12px 0;display:flex;align-items:center;gap:8px">
+    <input type="checkbox" id="downloadMedia" style="width:auto;margin:0">
+    <label for="downloadMedia" style="font-size:13px;color:#333;cursor:pointer">📦 同时下载帖子附件（图片/视频）</label>
+  </div>
   <button class="btn btn-go" id="goBtn" onclick="run()" data-i18n="btnRun">🚀 开始抓取</button>
   <div class="note" data-i18n="note">仅用于访问公开帖子，不会存储</div>
 </div>
@@ -455,10 +459,11 @@ function renderAnalysis(a){
 }
 async function run(){
   const u=document.getElementById('url').value.trim(),t=document.getElementById('token').value.trim(),n=document.getElementById('count').value;
+  const downloadMedia=document.getElementById('downloadMedia').checked;
   if(!u||!t)return alert('请填写链接和 auth_token');
   B.disabled=true;B.textContent='⏳ 抓取中...';R.classList.remove('show');L.innerHTML='';A('开始...','info');
   try{
-    const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,token:t,count:parseInt(n)})});
+    const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u,token:t,count:parseInt(n),downloadMedia})});
     let d;
     try{d=await r.json()}catch(e){A('服务器返回异常，请稍后重试','err');B.disabled=false;B.textContent='🚀 开始抓取';return}
     if(d.error){A(d.error,'err');B.disabled=false;B.textContent='🚀 开始抓取';return}
@@ -755,6 +760,43 @@ async function downloadMedia(postUrl,token,jobDir){
   return{post,downloadedImgs,videoFile};
 }
 
+// 批量抓取时的轻量级媒体下载（不抓取评论，不翻译）
+async function downloadMediaForBatch(postUrl,token,jobDir){
+  const mediaDir=path.join(jobDir,'media');fs.existsSync(mediaDir)||fs.mkdirSync(mediaDir,{recursive:true});
+  const{post}=await scrapePost(postUrl,token);
+  if(!post)throw new Error('无法读取帖子内容');
+  
+  const downloadedImgs=[];
+  for(let i=0;i<post.imgs.length;i++){
+    const imgUrl=post.imgs[i];
+    const ext=imgUrl.includes('format=png')?'png':'jpg';
+    const fname=`img_${String(i+1).padStart(2,'0')}.${ext}`;
+    try{
+      const{execSync}=require('child_process');
+      execSync(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000});
+      downloadedImgs.push('media/'+fname);
+    }catch(e){/* skip */}
+  }
+  
+  let videoFile=null;
+  if(post.hasVideo){
+    try{
+      const{execSync}=require('child_process');
+      const cookieFile=path.join(jobDir,'.cookies.txt');
+      const ct0=token.substring(0,16)+'a'.repeat(16);
+      fs.writeFileSync(cookieFile,`# Netscape HTTP Cookie File
+.x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}
+.x.com\tTRUE\t/\tTRUE\t0\tct0\t${ct0}
+`);
+      execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}"`,{timeout:120000});
+      if(fs.existsSync(path.join(mediaDir,'video.mp4')))videoFile='media/video.mp4';
+      try{fs.unlinkSync(cookieFile)}catch(e){}
+    }catch(e){}
+  }
+  
+  return{downloadedImgs,videoFile};
+}
+
 // ============================================================
 const server=http.createServer(async(req,res)=>{
   const u=new URL(req.url,`http://localhost:${PORT}`);
@@ -769,7 +811,7 @@ const server=http.createServer(async(req,res)=>{
   if(u.pathname==='/api/run'&&req.method==='POST'){
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
       try{
-        const{url,token,count}=JSON.parse(body),m=url.match(/x\.com\/(\w+)/);
+        const{url,token,count,downloadMedia:shouldDownload}=JSON.parse(body),m=url.match(/x\.com\/(\w+)/);
         if(!m)return res.end(JSON.stringify({error:'无效链接'}));
         const handle=m[1],jobDir=path.join(OUTPUT,handle);
         fs.existsSync(jobDir)||fs.mkdirSync(jobDir,{recursive:true});
@@ -779,6 +821,30 @@ const server=http.createServer(async(req,res)=>{
         const tf=path.join(jobDir,'translations.json');
         if(fs.existsSync(tf)){const tmap=JSON.parse(fs.readFileSync(tf,'utf8'));data.posts.forEach(p=>{const q=p.q;let best='',bk='';for(const[k,v]of Object.entries(tmap)){if(q.startsWith(k.substring(0,Math.min(40,k.length)))&&k.length>bk.length){bk=k;best=v}}if(best)p.cn=best})}
         await translatePosts(data.posts);
+        
+        // 📦 批量下载帖子附件（如果勾选）
+        if(shouldDownload){
+          console.log('📦 开始批量下载帖子附件...');
+          let downloaded=0,failed=0;
+          for(let i=0;i<data.posts.length;i++){
+            const post=data.posts[i];
+            if(!post.link)continue;
+            try{
+              console.log(`  [${i+1}/${data.posts.length}] 下载: ${post.link}`);
+              const mediaJobDir=path.join(OUTPUT,'_media',`${handle}_${post.link.split('/').pop()}`);
+              fs.existsSync(mediaJobDir)||fs.mkdirSync(mediaJobDir,{recursive:true});
+              const result=await downloadMediaForBatch(post.link,token,mediaJobDir);
+              post.downloadedImages=result.downloadedImgs;
+              post.downloadedVideo=result.videoFile;
+              downloaded++;
+            }catch(e){
+              console.error(`  ❌ [${i+1}] 下载失败: ${e.message}`);
+              failed++;
+            }
+          }
+          console.log(`✅ 附件下载完成: ${downloaded} 成功, ${failed} 失败`);
+        }
+        
         // 🖼️ 搜索真实配图
         console.log('🔍 开始搜索配图...');
         data.posts = await searchImagesForPosts(data.posts, 1200); // 每张图延迟1.2秒
