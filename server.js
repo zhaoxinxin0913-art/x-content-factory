@@ -105,7 +105,7 @@ function analyzeStyle(posts){
   const n=ve||1;
   // 提问词频
   const qw={'มั้ย/ไหม':['มั้ย','ไหม'],'อะไร':['อะไร'],'ทำไม':['ทำไม'],'ใคร':['ใคร'],'ยังไง':['ยังไง']};
-  const qs={};posts.forEach(p=>Object.entries(qw).forEach(([l,ws])=>{if(ws.some(w=>p.q.includes(w)))qs[l]=(qs[l]||0)+1}));
+  const qs={};posts.forEach(p=>Object.entries(qw).forEach(([l,ws])=>{if(p.q&&ws.some(w=>p.q.includes(w)))qs[l]=(qs[l]||0)+1}));
   const topQ=Object.entries(qs).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([w,c])=>({w,c}));
   // 内容调性
   const all=posts.map(p=>p.q).join(' ');const tones=[];
