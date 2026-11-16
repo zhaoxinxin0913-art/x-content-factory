@@ -45,7 +45,9 @@ function buildClassifiedWorkbook(task, results, reviews, kind, languageName = l 
       let route = r ? (r.route || (r.needsReview ? 'human' : 'auto')) : (srcEmpty ? 'none' : 'human');
       let translation = cellValue(review && review.decision === 'fix' ? review.finalText : (r ? r.translation : ''));
       if (review && ['accept', 'fix'].includes(review.decision)) route = 'auto';
-      return { r, route, translation };
+      const rejected = review && review.decision === 'reject';
+      if (rejected) route = 'human';
+      return { r, route, translation, rejected };
     };
     const cells = langs.map(cell);
     // 整行所有语种都无需翻译(空原文且无结果) → 跳过
@@ -60,7 +62,7 @@ function buildClassifiedWorkbook(task, results, reviews, kind, languageName = l 
         if (c.r && c.route === kind) {
           const det = c.r.cDetail || {};
           const rule = /rule-based-arbiter/.test(String(c.r.modelC || ''));
-          const reasons = [c.r.reviewReason, det.review_reason, ...(c.r.programChecks || [])].filter(Boolean);
+          const reasons = [c.rejected ? '人工已拒绝，待修正' : '', c.r.reviewReason, det.review_reason, ...(c.r.programChecks || []), ...(c.r.aiReviewIssues || [])].filter(Boolean);
           const et = det.error_types;
           values.push(
             c.translation,

@@ -898,6 +898,15 @@ app.post('/api/translate', async (req, res) => {
   if (task.status === 'translating') {
     return res.json({ success: true, message: 'Translation already in progress' });
   }
+  if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= task.headers.length
+      || !Array.isArray(targetLangs) || !targetLangs.length
+      || targetLangs.some(lang => typeof lang !== 'string' || !Object.hasOwn(LANGS, lang))
+      || new Set(targetLangs).size !== targetLangs.length) {
+    return res.status(400).json({ success: false, error: '请选择有效原文列和不重复的目标语种' });
+  }
+  if (DB.results.some(r => r.taskId === taskId)) {
+    return res.status(409).json({ success: false, error: '任务已有翻译结果，请使用补翻失败条目；如需整批重译，请重新导入，避免覆盖复核结果或产生重复数据' });
+  }
 
   task.status = 'translating';
   task.targetLangs = targetLangs;
@@ -907,7 +916,12 @@ app.post('/api/translate', async (req, res) => {
   saveDB();
 
   // 异步处理翻译流水线
-  processTranslationPipeline(taskId, columnIndex, targetLangs).catch(console.error);
+  processTranslationPipeline(taskId, columnIndex, targetLangs).catch(error => {
+    console.error('[Pipeline] task failed:', error.message);
+    task.status = 'aborted';
+    task.error = '翻译中断，可检查配置后补翻失败条目';
+    saveDB();
+  });
 
   res.json({ success: true, message: 'Translation pipeline started' });
 });
@@ -923,11 +937,11 @@ app.get('/api/task/:taskId', (req, res) => {
   const reviews = DB.reviews.filter(r => r.taskId === req.params.taskId);
 
   // 进度统计
-  const expectedTotal = (task.data ? task.data.filter(row => row[task.columnIndex]).length : 0)
+  const expectedTotal = (task.data ? task.data.filter(row => row[task.columnIndex] != null && String(row[task.columnIndex]).trim() !== '').length : 0)
     * (task.targetLangs ? task.targetLangs.length : 0);
   const done = results.length;
-  const needsReviewCount = results.filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id)).length;
-  const reviewedCount = reviews.length;
+  const needsReviewCount = results.filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id && rv.decision !== 'reject')).length;
+  const reviewedCount = reviews.filter(rv => rv.decision !== 'reject').length;
   // 三档分流统计
   const autoCount = results.filter(r => r.route === 'auto').length;
   const spotCount = results.filter(r => r.route === 'spot_check').length;
@@ -958,7 +972,7 @@ app.get('/api/progress/:taskId', (req, res) => {
   if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
   const results = DB.results.filter(r => r.taskId === req.params.taskId);
   const reviews = DB.reviews.filter(r => r.taskId === req.params.taskId);
-  const expectedTotal = (task.data ? task.data.filter(row => row[task.columnIndex]).length : 0)
+  const expectedTotal = (task.data ? task.data.filter(row => row[task.columnIndex] != null && String(row[task.columnIndex]).trim() !== '').length : 0)
     * (task.targetLangs ? task.targetLangs.length : 0);
   const done = results.length;
   res.json({
@@ -969,8 +983,8 @@ app.get('/api/progress/:taskId', (req, res) => {
       done,
       expectedTotal,
       percent: expectedTotal > 0 ? Math.round(done / expectedTotal * 100) : (task.status === 'completed' ? 100 : 0),
-      needsReviewCount: results.filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id)).length,
-      reviewedCount: reviews.length,
+      needsReviewCount: results.filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id && rv.decision !== 'reject')).length,
+      reviewedCount: reviews.filter(rv => rv.decision !== 'reject').length,
       autoCount: results.filter(r => r.route === 'auto').length,
       spotCount: results.filter(r => r.route === 'spot_check').length,
       humanCount: results.filter(r => r.route === 'human').length
@@ -1004,6 +1018,11 @@ app.post('/api/review', (req, res) => {
 
   DB.reviews = DB.reviews.filter(r => r.resultId !== resultId);
   DB.reviews.push(review);
+  if (decision === 'reject') {
+    result.needsReview = true;
+    result.route = 'human';
+    result.reviewReason = '人工已拒绝，待修正';
+  }
 
   // 如果是修正，加入训练样本
   if (decision === 'fix' && finalText) {
@@ -1073,7 +1092,7 @@ async function runAiReview(task, targets, cfg, job) {
           continue;
         }
         delete r.aiReviewIssues;
-        if (tryParseJson(String(r.sourceText).trim())) job.jsonFixed++;
+        if (tryParseJson(String(r.sourceText).trim()).ok) job.jsonFixed++;
         if (!DB.reviews.find(rv => rv.resultId === r.id)) {          // 幂等：不重复写
           DB.reviews.push({ id: `review_ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             taskId: task.id, resultId: r.id, decision: 'fix', finalText: final,
@@ -1151,7 +1170,9 @@ app.get('/api/export/:taskId', (req, res) => {
       const result = results.find(r => r.rowIndex === rowIndex && r.targetLang === lang);
       const review = result ? reviews.find(rv => rv.resultId === result.id) : null;
 
-      if (review && review.decision === 'fix') {
+      if (review && review.decision === 'reject') {
+        rowResults[`${lang}_translation`] = '';
+      } else if (review && review.decision === 'fix') {
         rowResults[`${lang}_translation`] = review.finalText;
       } else if (result) {
         rowResults[`${lang}_translation`] = result.translation;
@@ -1228,7 +1249,10 @@ app.get('/api/export-review/:taskId', (req, res) => {
 
   // 只取需复核且尚未处理的条目
   const rows = results
-    .filter(r => r.needsReview && !reviews.find(rv => rv.resultId === r.id))
+    .filter(r => {
+      const review = reviews.find(rv => rv.resultId === r.id);
+      return review?.decision === 'reject' || (r.needsReview && !review);
+    })
     .map(r => {
       const ref = refCells(r.rowIndex);
       const d = r.cDetail || {};
@@ -1248,7 +1272,7 @@ app.get('/api/export-review/:taskId', (req, res) => {
         '程序检查': Array.isArray(r.programChecks) && r.programChecks.length ? '❌ ' + r.programChecks.join('; ') : '✓ 通过',
         '一致性评分': r.consistency,
         '问题类型': Array.isArray(d.error_types) ? d.error_types.join('; ') : '',
-        '复核原因': d.review_reason || r.divergence || r.reviewReason || '',
+        '复核原因': reviews.some(rv => rv.resultId === r.id && rv.decision === 'reject') ? '人工已拒绝，待修正' : (d.review_reason || r.divergence || r.reviewReason || ''),
         '需补充语境': d.context_needed || '',
         '人工修正译文': ''  // 留空列，供同事填写
       };

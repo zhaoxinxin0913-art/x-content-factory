@@ -714,7 +714,7 @@ $('#toReviewBtn').onclick=()=>{ buildReview(); showView(4); };
 // ---- review ----
 function buildReview(){
   const routeFilter=$('#reviewRouteFilter').value;  // 默认 human：主视图只看人工必审
-  let all=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  let all=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id && rv.decision!=='reject'));
   if(routeFilter) all=all.filter(r=>r.route===routeFilter);
   // 填充语种筛选下拉(仅列出当前档位队列里实际出现的语种)
   const langName=c=>{const l=state.langs.find(x=>x.code===c);return l?l.flag+' '+l.name:c;};
@@ -733,11 +733,11 @@ function buildReview(){
 function renderReviewList(){
   const langFilter=$('#reviewLangFilter').value;
   const routeFilter=$('#reviewRouteFilter').value;
-  let items=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  let items=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id && rv.decision!=='reject'));
   if(routeFilter) items=items.filter(r=>r.route===routeFilter);
   if(langFilter) items=items.filter(r=>r.targetLang===langFilter);
   // 统计各档数量(用于计数提示)
-  const openAll=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id));
+  const openAll=state.results.filter(r=>r.needsReview && !state.reviews.find(rv=>rv.resultId===r.id && rv.decision!=='reject'));
   const nHuman=openAll.filter(r=>r.route==='human').length;
   const nSpot=openAll.filter(r=>r.route==='spot_check').length;
   $('#reviewCount').textContent='('+items.length+' 条 · 人工必审'+nHuman+'/抽查'+nSpot+')';

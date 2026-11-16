@@ -640,16 +640,16 @@ async function sendToFeishu(postUrl,token){
     });
     const data=await res.json();
     if(data.success){
-      alert('✅ 已成功发送到飞书多维表格！\n记录ID: '+data.record_id);
+      alert('[成功] 已发送到飞书多维表格！记录ID: '+data.record_id);
       btn.textContent='✅ 已发送';
       btn.style.background='#00ba7c';
     }else{
-      alert('❌ 发送失败: '+(data.error||'未知错误'));
+      alert('[失败] 发送失败: '+(data.error||'未知错误'));
       btn.disabled=false;
       btn.textContent='📤 发送到飞书';
     }
   }catch(e){
-    alert('❌ 发送异常: '+e.message);
+    alert('[异常] 发送异常: '+e.message);
     btn.disabled=false;
     btn.textContent='📤 发送到飞书';
   }
