@@ -3,10 +3,10 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const APP_ID = process.env.FEISHU_APP_ID || 'cli_aa87e573e0b99bc9';
-const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
-const BASE_ID = 'Cc9EwQoQIiLxw1kUzoOcg6DHnUd';
-const TABLE_ID = 'tbl2YnuB3tpBZP0o'; // 新表格ID（2026-11-16更新）
+const APP_ID = process.env.FEISHU_APP_ID || 'cli_aaff3b15c2395bd9';
+const APP_SECRET = process.env.FEISHU_APP_SECRET || 'mXiJ3Z2jJv70Z9eVZrBTbfD16MpyZzH4';
+const BASE_ID = 'CRKhbWNx1aktJCslD3lc3jgIn5c'; // 新BASE_ID（2026-11-16更新）
+const TABLE_ID = 'tbl9czFw0SwKsffb'; // 新TABLE_ID（2026-11-16更新）
 const FOLDER_ID = 'I6GzftxwXlvw9AdOYx9c0jQ6n3c'; // 云空间文件夹ID
 
 // 字段映射
