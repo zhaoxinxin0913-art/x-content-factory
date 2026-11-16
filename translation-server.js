@@ -348,7 +348,14 @@ function termTranslationForLang(term, lang) {
 const upload = multer({ dest: UPLOAD_DIR });
 
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static(__dirname));
+// Never expose the repository root: it contains model credentials and user data.
+// Downloads remain behind the existing API routes, not guessable static paths.
+for (const file of ['translation-ui.html', 'translation-reference-audit.html', 'translation-reference-audit.json']) {
+  app.get('/' + file, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(__dirname, file));
+  });
+}
 
 // ============================================================
 // 翻译工具函数（兜底方案）
@@ -1359,6 +1366,9 @@ function matchSourceTerms(text, terms, caseSensitive = false) {
 
 function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   const src = String(sourceText || ''), out = String(finalText || '');
+  // A skipped resource is immutable, including whitespace, query and fragment.
+  // Apply this to manual/AI review too, not just initial translation.
+  if (isPureMediaLink(src)) return { pass: src === out, issues: src === out ? [] : ['纯链接/资源路径必须原样保留'] };
   const issues = [];
   // emoji 匹配正则(复用于 未翻译判定 与 emoji一致性)
   const emojiReGlobal = /(\p{Extended_Pictographic}(\uFE0F|\u200D\p{Extended_Pictographic})*|[\u{1F1E6}-\u{1F1FF}]{2})/gu;
@@ -1378,8 +1388,7 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   const srcTags = (src.match(tagRe) || []).sort().join(''), outTags = (out.match(tagRe) || []).sort().join('');
   if (srcTags !== outTags) issues.push('HTML标签不一致');
   // 4. URL 未改变
-  const urlRe = /https?:\/\/[^\s"'<>]+/g;
-  const srcUrls = (src.match(urlRe) || []).sort().join(' '), outUrls = (out.match(urlRe) || []).sort().join(' ');
+  const srcUrls = extractContentLinks(src).sort().join('\n'), outUrls = extractContentLinks(out).sort().join('\n');
   if (srcUrls !== outUrls) issues.push('URL被改动');
   // 5. 数字/金额集合一致（防金额/数量被改）
   const numRe = /\d[\d,.]*/g;
@@ -1443,12 +1452,14 @@ function tryParseJson(s) {
 }
 // 提取JSON的"结构骨架"：对象记录排序后的键集合，数组记录长度，递归；忽略所有字符串value内容
 function jsonSkeleton(v) {
-  if (Array.isArray(v)) return 'A' + v.length + '[' + v.map(jsonSkeleton).join(',') + ']';
+  if (Array.isArray(v)) return JSON.stringify(['array', v.map(jsonSkeleton)]);
   if (v && typeof v === 'object') {
     const keys = Object.keys(v).sort();
-    return 'O{' + keys.map(k => k + ':' + jsonSkeleton(v[k])).join(',') + '}';
+    return JSON.stringify(['object', keys.map(k => [k, jsonSkeleton(v[k])])]);
   }
-  return typeof v === 'number' ? 'N' : (typeof v === 'boolean' ? 'B' : 'S'); // 标量类型，字符串一律S
+  // Only human-readable string values may change; booleans, null and each
+  // numeric value must remain at their original JSON paths (not just as a bag).
+  return typeof v === 'string' ? 'string' : JSON.stringify([typeof v, v]);
 }
 // 返回错误描述(字符串)或 null(通过/不适用)
 function jsonStructCheck(src, out) {
@@ -1510,14 +1521,17 @@ function classifyRoute(cRes, progCheck, transA, transB, sourceText) {
   // 程序检查是硬约束，任何情况下未过都进人工（占位符/emoji/数字/术语等确定性错误）
   if (!progCheck.pass) return 'human';
   if (d.placeholder_check === 'fail' || d.terminology_check === 'fail' || d.locale_check === 'fail') return 'human';
+  // A/B agreement must not override an explicit C rejection or low score.
+  if (score < 70 || d.needs_human_review === true || decision === 'human_review') return 'human';
 
   // 【A/B 独立一致豁免】两个独立模型译出完全相同结果 + 程序检查全过 → 最强正确性信号
   // 非高危 → 直接自动通过(彻底放行,忽略C的medium/human_review/rewrite等软性判断,不再出现在复核台)
   // 高危(支付/安全/隐私/处罚/未成年) → 抽查(留一道人眼,但不占人工必审)
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const abIdentical = norm(transA) && norm(transA) === norm(transB);
-  if (abIdentical && checksPass) {
-    return risk === 'high' ? 'spot_check' : 'auto';
+  const finalMatchesDraft = norm(cRes.final) === norm(transA);
+  if (abIdentical && finalMatchesDraft && checksPass) {
+    return risk === 'high' || risk === 'medium' || score < 85 || decision === 'rewrite' ? 'spot_check' : 'auto';
   }
 
   // 人工复审（任一命中）
@@ -1665,13 +1679,26 @@ async function arbitrateWindow(jobs, lang) {
   return out;
 }
 
-// 纯媒体/文件链接判定（严格口径）：整格就是一条以图片/媒体扩展名结尾的链接或文件路径，
-// 前后无其他文字、无空格分隔。命中者不翻译，原样保留。
+// Compatibility name retained. Now covers ordinary web links, signed media URLs
+// and resource filenames/paths. Never fetch links; recognition is local only.
 function isPureMediaLink(text) {
   const s = String(text == null ? '' : text).trim();
-  if (!s) return false;
-  if (/\s/.test(s)) return false;                     // 含空格 → 有说明文字，不算纯链接
-  return /^(https?:\/\/|www\.|\/)?[^\s]+\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|mov|webm|avi|pdf)$/i.test(s);
+  if (!s || /[\s<>"'`]/u.test(s)) return false;
+  if (/^(?:https?:\/\/|\/\/|www\.)[^/?#\s]+(?:[/?#][^\s]*)?$/iu.test(s)) return true;
+  if (/^mailto:[^\s@?]+@[^\s@?]+(?:\?[^\s]*)?$/i.test(s)) return true;
+  return /^(?:\.?\.?\/)?[^\s?#]+\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|mov|webm|avi|pdf)(?:[?#][^\s]*)?$/i.test(s);
+}
+
+function extractContentLinks(text) {
+  const links = String(text).match(/(?:https?:\/\/|www\.|mailto:|(?<![\w:])\/\/)[^\s"'<>\\\u3000-\u303f\uff00-\uffef]+/giu) || [];
+  return links.map(link => {
+    let s = link.replace(/[.,;!]+$/, '');
+    // Exclude surrounding Markdown/punctuation, but retain balanced URL brackets.
+    for (const [open, close] of [['(', ')'], ['[', ']']]) {
+      while (s.endsWith(close) && s.split(close).length > s.split(open).length) s = s.slice(0, -1);
+    }
+    return s;
+  });
 }
 
 // 组装单条结果（主流程与补翻共用，保证分档/复核原因逻辑完全一致）
@@ -1687,7 +1714,8 @@ function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gl
       route: 'auto', programChecks: [], needsReview: false,
       reviewReason: '', reviewSeverity: 'low',
       modelA: 'skip-media-link', modelB: 'skip-media-link', modelC: 'skip-media-link',
-      cDetail: { decision: 'keep_source', reason: '纯媒体/文件链接，规则跳过翻译', auto_approve: true },
+      skippedTranslation: true, skipReason: 'pure_link_or_resource',
+      cDetail: { decision: 'keep_source', reason: '纯链接/资源路径，规则跳过翻译（未调用模型）', auto_approve: true },
       createdAt: new Date().toISOString()
     };
   }
@@ -1716,7 +1744,8 @@ function needsRetranslate(r) {
 // 失败熔断：本窗口刚写入的结果里，若 ≥80% 是模型跳过(no-engine-skip)，说明模型出问题，应中断任务
 function abortIfMassSkip(taskId, jobs, lang) {
   if (!jobs.length) return false;
-  const ids = new Set(jobs.map(j => j.rowIndex));
+  // Intentional link skips must not dilute real model failures.
+  const ids = new Set(jobs.filter(j => !isPureMediaLink(j.sourceText)).map(j => j.rowIndex));
   const rows = DB.results.filter(r => r.taskId === taskId && r.targetLang === lang && ids.has(r.rowIndex));
   if (!rows.length) return false;
   const skipped = rows.filter(r => /no-engine-skip/.test(String(r.modelA || '')) || /no-engine-skip/.test(String(r.modelB || ''))).length;
@@ -1792,7 +1821,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
   // 处理单条 (rowIndex, lang) 作业：A/B 双翻译 → C 比对裁决
   async function processOne(rowIndex, lang, draft) {
     const raw = task.data[rowIndex][columnIndex];
-    if (raw === undefined || raw === null || String(raw) === '') return null;
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null;
     const sourceText = String(raw);
     const refs = draft ? draft.refs : buildRefs(task, task.data[rowIndex], lang, sourceText);
 
@@ -1824,7 +1853,7 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
     const rowIdxs = [];
     for (let i = 0; i < totalRows; i++) {
       const raw = task.data[i][columnIndex];
-      if (raw !== undefined && raw !== null && String(raw) !== '') rowIdxs.push(i);
+      if (raw !== undefined && raw !== null && String(raw).trim() !== '') rowIdxs.push(i);
     }
     // At most 100 rows buffered; A/B independently pack smaller length-aware batches.
     // C and deterministic checks ALWAYS execute per item, including cache hits.
@@ -1868,7 +1897,8 @@ if (require.main !== module) {
   module.exports = {
     programChecks, jsonStructCheck, jsonSkeleton, tryParseJson, detectHighRisk, isPureMediaLink,
     canonicalLang, langName, localeRulesToPrompt, productKnowledgeToPrompt, termTranslationForLang,
-    matchSourceTerms, buildRefs, buildAiReviewPrompt, buildGlossary, runAiReview
+    matchSourceTerms, buildRefs, buildAiReviewPrompt, buildGlossary, runAiReview,
+    app, extractContentLinks, classifyRoute, assembleResult, abortIfMassSkip
   };
 }
 

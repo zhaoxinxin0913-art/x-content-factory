@@ -587,7 +587,7 @@ async function runMedia(){
     html+='</tr></tbody></table>';
     html+='<div style="display:flex;gap:10px;margin-top:10px">';
     html+='<button onclick="copyTableToClipboard()" style="padding:8px 16px;background:#00ba7c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📋 复制表格</button>';
-    html+='<button onclick="sendToFeishu(\''+u+'\',\''+t+'\')" id="feishuBtn" style="padding:8px 16px;background:#1d9bf0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📤 发送到飞书</button>';
+    html+='<button onclick="sendToFeishu(&quot;'+u+'&quot;,&quot;'+t+'&quot;)" id="feishuBtn" style="padding:8px 16px;background:#1d9bf0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📤 发送到飞书</button>';
     html+='</div>';
     
     MR.innerHTML=html;MR.classList.add('show');
