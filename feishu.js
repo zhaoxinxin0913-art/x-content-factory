@@ -241,7 +241,16 @@ async function uploadToFeishu(postData) {
     };
     
     // 收集附件文件路径（兼容新旧格式）
-    if (postData.imagePaths && postData.imagePaths.length > 0) {
+    // 优先使用新格式的 files 数组
+    if (postData.files && postData.files.length > 0) {
+      postData.files.forEach(filePath => {
+        if (filePath && fs.existsSync(filePath)) {
+          data.files.push(filePath);
+        }
+      });
+    }
+    // 兼容旧格式
+    else if (postData.imagePaths && postData.imagePaths.length > 0) {
       postData.imagePaths.forEach(imgPath => {
         if (imgPath && fs.existsSync(imgPath)) {
           data.files.push(imgPath);
