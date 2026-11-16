@@ -92,7 +92,13 @@ async function runBatchMedia() {
     html += '</div>';
     
     if (d.results && d.results.length > 0) {
+      // 添加批量发送到飞书按钮
+      html += '<div style="margin:16px 0"><button onclick="batchSendToFeishu()" id="batchFeishuBtn" style="padding:10px 20px;background:#00ba7c;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500">📤 批量发送到飞书 (' + d.results.length + '条)</button></div>';
+      
       html += '<h4 style="margin:20px 0 10px 0">📋 提取结果</h4>';
+      // 保存结果到全局，供批量发送使用
+      window.batchResults = d.results;
+      
       d.results.forEach(function(item, idx) {
         html += '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:12px">';
         html += '<div style="font-size:11px;color:#999;margin-bottom:6px">#' + (idx+1) + ' - ' + (item.category || 'General') + '</div>';
@@ -135,7 +141,85 @@ async function runBatchMedia() {
   MB.textContent = '🎬 开始搬运';
 }
 
+// 批量发送到飞书
+async function batchSendToFeishu() {
+  if (!window.batchResults || window.batchResults.length === 0) {
+    return alert('没有可发送的结果');
+  }
+  
+  const btn = document.getElementById('batchFeishuBtn');
+  if (!btn) return;
+  
+  btn.disabled = true;
+  btn.textContent = '⏳ 正在发送 (0/' + window.batchResults.length + ')...';
+  
+  let successCount = 0;
+  let failCount = 0;
+  const errors = [];
+  
+  // 并发发送（每次5个）
+  const concurrency = 5;
+  for (let i = 0; i < window.batchResults.length; i += concurrency) {
+    const batch = window.batchResults.slice(i, i + concurrency);
+    
+    await Promise.allSettled(batch.map(async (item) => {
+      try {
+        const res = await fetch('/api/send-to-feishu-batch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            content: item.cnText || item.text,
+            tags: item.cnTags + ' ' + item.origTags,
+            images: item.images || 0,
+            mediaType: item.mediaType || (item.video ? '视频' : '图片'),
+            files: []  // 批量模式暂不上传附件（可以后续优化）
+          })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+          successCount++;
+        } else {
+          failCount++;
+          errors.push({ url: item.postUrl, error: data.error || '未知错误' });
+        }
+      } catch (e) {
+        failCount++;
+        errors.push({ url: item.postUrl, error: e.message });
+      }
+      
+      // 更新进度
+      btn.textContent = '⏳ 正在发送 (' + (successCount + failCount) + '/' + window.batchResults.length + ')...';
+    }));
+  }
+  
+  // 完成
+  btn.textContent = '✅ 发送完成';
+  btn.style.background = '#00ba7c';
+  
+  let message = '批量发送完成！\\n\\n';
+  message += '✅ 成功: ' + successCount + '\\n';
+  if (failCount > 0) {
+    message += '❌ 失败: ' + failCount + '\\n\\n';
+    message += '失败详情：\\n';
+    errors.slice(0, 3).forEach(err => {
+      message += '• ' + err.url + ': ' + err.error + '\\n';
+    });
+    if (errors.length > 3) {
+      message += '... 还有 ' + (errors.length - 3) + ' 个失败';
+    }
+  }
+  
+  alert(message);
+  
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '📤 批量发送到飞书';
+  }, 2000);
+}
+
 // 导出到全局
 window.switchMediaMode = switchMediaMode;
 window.runBatchMedia = runBatchMedia;
+window.batchSendToFeishu = batchSendToFeishu;
 window.currentMediaMode = function() { return currentMediaMode; };

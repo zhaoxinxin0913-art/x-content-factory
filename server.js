@@ -1107,6 +1107,27 @@ const server=http.createServer(async(req,res)=>{
       }
     });return;
   }
+  // 批量发送到飞书 API  
+  if(u.pathname==='/api/send-to-feishu-batch'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
+      try{
+        const data=JSON.parse(body);
+        const feishuResult=await uploadToFeishu(data);
+        
+        if(feishuResult.success){
+          res.writeHead(200,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({success:true,record_id:feishuResult.record_id}));
+        }else{
+          res.writeHead(400,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({error:feishuResult.error}));
+        }
+      }catch(e){
+        console.error('批量发送到飞书失败:',e);
+        res.writeHead(500,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:e.message}));
+      }
+    });return;
+  }
   // 批量媒体搬运 API
   if(u.pathname==='/api/batch-media'&&req.method==='POST'){
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
