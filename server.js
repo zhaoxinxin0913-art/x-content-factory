@@ -654,12 +654,15 @@ async function sendToFeishu(postUrl,token){
     btn.textContent='📤 发送到飞书';
   }
 }
-// 绑定Tab按钮事件（DOMContentLoaded确保元素已加载）
-document.addEventListener('DOMContentLoaded',function(){
-  document.getElementById('tabBatchBtn')?.addEventListener('click',()=>showTab('batch'));
-  document.getElementById('tabMediaBtn')?.addEventListener('click',()=>showTab('media'));
-  document.getElementById('tabMonitorBtn')?.addEventListener('click',()=>showTab('monitor'));
-});
+// 直接绑定Tab按钮事件（页面加载完成后执行）
+setTimeout(function(){
+  const batchBtn=document.getElementById('tabBatchBtn');
+  const mediaBtn=document.getElementById('tabMediaBtn');
+  const monitorBtn=document.getElementById('tabMonitorBtn');
+  if(batchBtn)batchBtn.addEventListener('click',()=>showTab('batch'));
+  if(mediaBtn)mediaBtn.addEventListener('click',()=>showTab('media'));
+  if(monitorBtn)monitorBtn.addEventListener('click',()=>showTab('monitor'));
+},0);
 </script>
 <script src="/batch-media.js"></script>
 <script>
