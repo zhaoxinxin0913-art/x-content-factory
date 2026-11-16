@@ -678,12 +678,66 @@ runMedia = async function() {
 </body></html>`;
 
 // ============================================================
+// 浏览器连接池（性能优化）
+// ============================================================
+let browserInstance = null;
+let browserLastUsed = Date.now();
+const BROWSER_TIMEOUT = 5 * 60 * 1000; // 5分钟不用就关闭
+
+async function getBrowser() {
+  const now = Date.now();
+  
+  // 如果浏览器存在且未超时
+  if (browserInstance && (now - browserLastUsed) < BROWSER_TIMEOUT) {
+    try {
+      // 测试浏览器是否还活着
+      await browserInstance.version();
+      browserLastUsed = now;
+      console.log('♻️  复用现有浏览器实例');
+      return browserInstance;
+    } catch (e) {
+      console.log('⚠️  浏览器实例失效，重新创建');
+      browserInstance = null;
+    }
+  }
+  
+  // 创建新浏览器实例
+  console.log('🚀 启动新浏览器实例...');
+  browserInstance = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-dev-shm-usage',
+      '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    ]
+  });
+  browserLastUsed = now;
+  
+  // 5分钟后自动关闭
+  setTimeout(async () => {
+    if (browserInstance && (Date.now() - browserLastUsed) >= BROWSER_TIMEOUT) {
+      console.log('⏰ 浏览器空闲超时，自动关闭');
+      try {
+        await browserInstance.close();
+      } catch (e) {}
+      browserInstance = null;
+    }
+  }, BROWSER_TIMEOUT);
+  
+  return browserInstance;
+}
+
+// ============================================================
 // 媒体搬运模块
 // ============================================================
 async function scrapePost(postUrl,token){
-  const b=await puppeteer.launch({executablePath:CHROME_PATH,headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--disable-blink-features=AutomationControlled','--disable-dev-shm-usage','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36']});
+  const b = await getBrowser(); // 使用连接池
+  const p=await b.newPage();
   try {
-    const p=await b.newPage();await p.setViewport({width:1280,height:900});
+    await p.setViewport({width:1280,height:900});
     await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
     await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
     await new Promise(r=>setTimeout(r,300)); // 优化：1000→300ms
@@ -741,7 +795,7 @@ async function scrapePost(postUrl,token){
     // 优化：跳过评论抓取（媒体搬运不需要）
     return{post,comments:[]};
   } finally {
-    await b.close();
+    await p.close(); // 只关闭页面，不关闭浏览器
   }
 }
 
