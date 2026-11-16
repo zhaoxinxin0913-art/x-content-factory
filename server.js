@@ -566,7 +566,10 @@ async function runMedia(){
     html+='<td style="border:1px solid #ddd;padding:8px">'+d.images+' 张图片'+(d.video?' + 1 视频':'')+'</td>';
     html+='<td style="border:1px solid #ddd;padding:8px">'+d.mediaType+'</td>';
     html+='</tr></tbody></table>';
-    html+='<button onclick="copyTableToClipboard()" style="margin-top:10px;padding:8px 16px;background:#00ba7c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📋 复制表格</button>';
+    html+='<div style="display:flex;gap:10px;margin-top:10px">';
+    html+='<button onclick="copyTableToClipboard()" style="padding:8px 16px;background:#00ba7c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📋 复制表格</button>';
+    html+='<button onclick="sendToFeishu(\''+u+'\',\''+t+'\')" id="feishuBtn" style="padding:8px 16px;background:#1d9bf0;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">📤 发送到飞书</button>';
+    html+='</div>';
     
     MR.innerHTML=html;MR.classList.add('show');
   }catch(e){MA(e.message,'err')}
@@ -603,6 +606,34 @@ function copyTableToClipboard(){
     alert('复制失败: '+e.message);
   }
   window.getSelection().removeAllRanges();
+}
+// 发送到飞书
+async function sendToFeishu(postUrl,token){
+  const btn=document.getElementById('feishuBtn');
+  if(!btn)return;
+  btn.disabled=true;
+  btn.textContent='⏳ 正在发送...';
+  try{
+    const res=await fetch('/api/send-to-feishu',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({postUrl,token})
+    });
+    const data=await res.json();
+    if(data.success){
+      alert('✅ 已成功发送到飞书多维表格！\n记录ID: '+data.record_id);
+      btn.textContent='✅ 已发送';
+      btn.style.background='#00ba7c';
+    }else{
+      alert('❌ 发送失败: '+(data.error||'未知错误'));
+      btn.disabled=false;
+      btn.textContent='📤 发送到飞书';
+    }
+  }catch(e){
+    alert('❌ 发送异常: '+e.message);
+    btn.disabled=false;
+    btn.textContent='📤 发送到飞书';
+  }
 }
 </script>
 <script src="/batch-media.js"></script>
@@ -943,6 +974,55 @@ const server=http.createServer(async(req,res)=>{
         res.writeHead(200,{'Content-Type':'application/json'});
         res.end(JSON.stringify(responseData));
       }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}))}
+    });return;
+  }
+  // 📤 发送到飞书 API
+  if(u.pathname==='/api/send-to-feishu'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
+      try{
+        const{postUrl,token}=JSON.parse(body);
+        if(!postUrl||!token)return res.end(JSON.stringify({error:'缺少参数'}));
+        
+        const m=postUrl.match(/x\.com\/(\w+)\/status\/(\d+)/);
+        if(!m)return res.end(JSON.stringify({error:'无效链接'}));
+        const handle=m[1],tweetId=m[2];
+        const jobDir=path.join(OUTPUT,'_media',`${handle}_${tweetId}`);
+        
+        // 检查是否已抓取
+        if(!fs.existsSync(jobDir)){
+          return res.end(JSON.stringify({error:'请先提取媒体内容'}));
+        }
+        
+        // 读取数据
+        const dataPath=path.join(jobDir,'data.json');
+        if(!fs.existsSync(dataPath)){
+          return res.end(JSON.stringify({error:'数据文件不存在'}));
+        }
+        const result=JSON.parse(fs.readFileSync(dataPath,'utf8'));
+        
+        // 上传到飞书
+        const fileList=[...result.downloadedImgs.map(p=>path.join(jobDir,p)),...(result.videoFile?[path.join(jobDir,result.videoFile)]:[])];
+        const feishuResult=await uploadToFeishu({
+          content:result.post.text,
+          cnText:result.post.cnText||'',
+          tags:result.post.tags||'',
+          images:result.downloadedImgs.length,
+          video:!!result.videoFile,
+          files:fileList
+        });
+        
+        if(feishuResult.success){
+          res.writeHead(200,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({success:true,record_id:feishuResult.record_id}));
+        }else{
+          res.writeHead(400,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({error:feishuResult.error}));
+        }
+      }catch(e){
+        console.error('发送到飞书失败:',e);
+        res.writeHead(500,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:e.message}));
+      }
     });return;
   }
   // 批量媒体搬运 API

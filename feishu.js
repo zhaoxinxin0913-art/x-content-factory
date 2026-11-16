@@ -6,7 +6,7 @@ const path = require('path');
 const APP_ID = process.env.FEISHU_APP_ID || 'cli_aa87e573e0b99bc9';
 const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
 const BASE_ID = 'Cc9EwQoQIiLxw1kUzoOcg6DHnUd';
-const TABLE_ID = 'tblRbwUBibElOq3J'; // 新表格ID
+const TABLE_ID = 'tbl2YnuB3tpBZP0o'; // 新表格ID（2026-11-16更新）
 const FOLDER_ID = 'I6GzftxwXlvw9AdOYx9c0jQ6n3c'; // 云空间文件夹ID
 
 // 字段映射
