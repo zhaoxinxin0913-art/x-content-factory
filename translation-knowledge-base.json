@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-16.1",
+  "version": "2026-11-16.2",
   "product": {
     "name": "POPUP",
     "positioning": "面向年轻用户的娱乐、直播社交、语音房、游戏化活动与会员体系 App",
@@ -17,7 +17,7 @@
   "concepts": [
     {
       "group": "社交关系",
-      "rule": "Follow/Following/Followers 是免费的社交关注关系；Subscription/Subscribe/Subscriber 是付费或内容订阅。Fans 只有原文明示粉丝时才译为粉丝，不得与 Followers 自动互换。"
+      "rule": "Follow/Following/Followers 是社交关注关系；Subscription/Subscribe/Subscriber 是订阅，可指内容、通知或付费服务，必须根据场景判断，不能凭该词增加付费含义。Fans 只有原文明示粉丝时才译为粉丝，不得与 Followers 自动互换。"
     },
     {
       "group": "内容与动态",

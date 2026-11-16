@@ -296,6 +296,10 @@
       </div>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" class="hidden">
       <div class="mode-note" id="uploadMode"></div>
+      <details style="margin-top:16px" id="localizationResources">
+        <summary style="cursor:pointer">查看术语参考与译文复用规则</summary>
+        <div id="localizationResourceBody" class="hint">展开加载</div>
+      </details>
     </div>
   </div>
 
@@ -311,7 +315,7 @@
       <div id="colHint" class="note" style="margin-top:10px"></div>
       <div class="tbl-wrap" id="previewWrap"></div>
       <label class="field-label" style="margin-top:18px">参考列（可选，多选）</label>
-      <div class="hint" style="margin-top:0">勾选同一行的其他列作为参考。类型徽章可<b>点击切换</b>：<b style="color:#2160b5">🌐 语种译文</b> ⇄ <b style="color:#a9701f">📝 场景说明</b>（系统自动预判，判错了点一下改）。帮模型理解语境、消歧提准，不增加耗时。</div>
+      <div class="hint" style="margin-top:0">key、模块、用途、场景说明、长度限制列会自动作为上下文。其他参考列可勾选，类型徽章可点击切换：🌐 语种译文 ⇄ 📝 场景说明。没有场景列也可以翻译；长度限制目前供模型参考。</div>
       <div class="lang-grid" id="refGrid" style="margin-top:8px"></div>
     </div>
     <div class="card">
@@ -429,6 +433,19 @@ async function init(){
   }catch(e){}
   initSettings();
 }
+$('#localizationResources').addEventListener('toggle', async function(){
+  if(!this.open) return;
+  const body=$('#localizationResourceBody');
+  try {
+    const data=await fetch('/api/localization-resources').then(r=>r.json());
+    if(!data.success) throw new Error('读取失败');
+    body.innerHTML=`<p>待确认术语 ${data.candidates.length} 项，按原文命中后作为建议提供给模型，不参与强制校验。人工确认记录 ${data.humanReviewed} 条。</p>
+      <p>${esc(data.memoryPolicy)}</p>
+      <p><a href="/translation-reference-audit.html" target="_blank" rel="noopener">查看社交项目三语术语对照</a></p>
+      <div style="max-height:320px;overflow:auto"><table><thead><tr><th>英文</th><th>韩语候选</th><th>台湾繁中候选</th><th>马来语候选</th></tr></thead><tbody>
+      ${data.candidates.map(t=>`<tr><td>${esc(t.en)}<br><small>${esc(t.notes||'')}</small></td><td>${esc(t['ko-KR']||'待母语确认')}</td><td>${esc(t['zh-TW']||'待母语确认')}</td><td>${esc(t['ms-MY']||'待母语确认')}</td></tr>`).join('')}</tbody></table></div>`;
+  } catch(e) { body.textContent='暂时无法加载：'+e.message; }
+});
 async function refreshStatus(){
   try{
     const st = await fetch('/api/status').then(r=>r.json());
@@ -744,6 +761,7 @@ function renderReviewList(){
         <div class="rp tr"><div class="lab">译文 B ${it.chosen==='B'?'✓C选用':''}</div><div class="val">${esc(it.translationB||'')}</div></div>
       </div>
       ${it.divergence?`<div class="suggest">⚖️ C 裁决分歧：${esc(it.divergence)}</div>`:''}
+      ${it.aiReviewIssues?.length?`<div class="suggest">AI 复核未写回：${esc(it.aiReviewIssues.join('；'))}</div>`:''}
       <div style="margin-top:6px;font-size:13px;color:var(--ink2)">C 推荐最终译文（${it.chosen==='merged'?'融合版':'译文'+it.chosen}）：<b>${esc(it.translation)}</b></div>
       <textarea class="fix-input" placeholder="修正译文（留空则采用 C 的最终译文）">${esc(it.translation||'')}</textarea>
       <div class="review-actions">
@@ -759,11 +777,12 @@ function renderReviewList(){
 }
 async function submitReview(resultId,decision,finalText,el){
   try{
-    await fetch('/api/review',{method:'POST',headers:{'Content-Type':'application/json'},
+    const response=await fetch('/api/review',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({taskId:state.taskId,resultId,decision,finalText})}).then(r=>r.json());
+    if(!response.success) throw new Error(response.error||'保存失败');
     el.classList.add('resolved');
     el.querySelectorAll('button').forEach(b=>b.disabled=true);
-    toast(decision==='fix'?'已修正并加入训练样本':'已通过','ok');
+    toast('已人工确认；后续相同原文和场景可作为译文参考','ok');
     const remain=document.querySelectorAll('.review-item:not(.resolved)').length;
     $('#reviewCount').textContent='('+remain+' 条待处理)';
   }catch(e){ toast('提交失败：'+e.message,'err'); }

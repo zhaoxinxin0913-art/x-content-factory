@@ -3559,7 +3559,7 @@
       "source_count": 51,
       "example_key": "VoiceMatch_Topic",
       "example_en": "What's your favorite outdoor activity?",
-      "notes": "候选译法：可能受按钮/标题/状态、产品机制或法律语境影响，确认前不进入程序硬校验。",
+      "notes": "通知中心才可考虑通知動態；普通活动、户外活动或运营活动须按场景翻译为活動等，不能统一套用通知含义。",
       "avoid": ""
     },
     {
@@ -3599,7 +3599,7 @@
       "source_count": 201,
       "example_key": "GroupChat_Upgrade_Tips",
       "example_en": "Please update to view the messages",
-      "notes": "候选译法：可能受按钮/标题/状态、产品机制或法律语境影响，确认前不进入程序硬校验。",
+      "notes": "此候选仅适用于查看动作；浏览次数/观看次数指标须另作判断，不得把统计数值标签翻成动词。",
       "avoid": ""
     },
     {
@@ -3827,9 +3827,9 @@
       "subcategory": "消息与互动",
       "zh": "下麦/不在麦上",
       "en": "Off Mic",
-      "ko-KR": "마이크 꺼짐",
+      "ko-KR": "",
       "zh-TW": "已下麥",
-      "ms-MY": "Mikrofon dimatikan",
+      "ms-MY": "",
       "ja-JP": "スピーカーから退出",
       "fr-FR": "Hors micro",
       "pt-PT": "Fora do microfone",
@@ -3839,7 +3839,7 @@
       "source_count": 0,
       "example_key": "",
       "example_en": "",
-      "notes": "候选译法：可能受按钮/标题/状态、产品机制或法律语境影响，确认前不进入程序硬校验。",
+      "notes": "产品概念为离开麦位/不在麦上，不等于关麦。原韩语及马来语候选仅表达麦克风关闭，已撤回，待母语确认；台湾繁中候选仅适用于状态标签，动作按钮需用下麥。",
       "avoid": ""
     },
     {
@@ -3909,7 +3909,7 @@
       "en": "Skin",
       "ko-KR": "스킨",
       "zh-TW": "造型",
-      "ms-MY": "Tema",
+      "ms-MY": "",
       "ja-JP": "スキン",
       "fr-FR": "Apparence",
       "pt-PT": "Visual",
@@ -3919,7 +3919,7 @@
       "source_count": 41,
       "example_key": "H5_GiftGallery_SubTitle1text",
       "example_en": "Have you ever wished you could customize your gift gallery with stunning, fancy skins? Great news! We're thrilled to introduce four brand-new gallery skins that will make your dream of decorating your gallery a reality and let it glow like never before. Over the next four days, a new skin will be released every other d",
-      "notes": "候选译法：可能受按钮/标题/状态、产品机制或法律语境影响，确认前不进入程序硬校验。",
+      "notes": "礼物展馆装扮场景。马来语 Tema 对应主题，是否适合作为皮肤/装扮名尚未确认，暂撤回候选，待母语审校。",
       "avoid": ""
     },
     {

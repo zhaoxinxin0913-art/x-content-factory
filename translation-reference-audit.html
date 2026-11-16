@@ -1,0 +1,18 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POPUP 社交术语对照</title>
+<style>body{font:15px/1.65 system-ui,sans-serif;background:#f5f7fb;color:#183153;margin:0;padding:32px}main{max-width:1400px;margin:auto}h1{font-size:25px}a{color:#2563eb}select,input{padding:9px;border:1px solid #ccd3df;border-radius:6px;margin:8px 12px 16px 0}table{border-collapse:collapse;width:100%;background:white}th,td{padding:12px;text-align:left;border-bottom:1px solid #e3e8f0;vertical-align:top}th{background:#183153;color:white;position:sticky;top:0}small{color:#657086}#table{overflow:auto}p{max-width:1000px}</style>
+<main><a href="/">返回翻译平台</a><h1>POPUP 社交术语对照</h1><p id="scope">正在加载公开来源对照…</p>
+<p>这是候选证据，差异不代表错误。当前术语不会因这份对照自动改变。每条来源链接固定到检索时的提交版本。</p>
+<label>地区 <select id="locale"><option value="">全部</option><option>ko-KR</option><option>zh-TW</option><option>ms-MY</option></select></label>
+<label>搜索 <input id="search" placeholder="英文概念或译文"></label><p id="count"></p><div id="table"></div><p id="pending"></p></main>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let report;
+function render(){const locale=document.querySelector('#locale').value;const q=document.querySelector('#search').value.toLowerCase();
+const rows=report.evidence.filter(r=>(!locale||r.locale===locale)&&JSON.stringify(r).toLowerCase().includes(q));
+document.querySelector('#count').textContent=`显示 ${rows.length} 条证据；可按地区筛选。`;
+document.querySelector('#table').innerHTML='<table><thead><tr><th>概念／地区</th><th>POPUP 当前</th><th>社区实际文案</th><th>语境与判断</th><th>来源</th></tr></thead><tbody>'+rows.map(r=>`<tr><td>${esc(r.concept)}<br><small>${esc(r.locale)}</small></td><td>${esc(r.current)}</td><td>${esc(r.reference)}<br><small>${esc(r.source)}</small></td><td>${esc(r.status)}<br><small>${esc(r.note)}</small></td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.project)}</a><br><small>${esc(r.key)}</small></td></tr>`).join('')+'</tbody></table>';
+}
+fetch('/translation-reference-audit.json').then(r=>{if(!r.ok)throw Error('尚未生成对照文件');return r.json()}).then(data=>{report=data;document.querySelector('#scope').textContent=data.date+'：'+data.scope;document.querySelector('#pending').textContent='需产品／母语确认：'+data.pending.join(' ');render();}).catch(e=>document.querySelector('#scope').textContent=e.message);
+document.querySelector('#locale').onchange=()=>report&&render();document.querySelector('#search').oninput=()=>report&&render();
+</script></html>

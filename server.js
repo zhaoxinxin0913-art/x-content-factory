@@ -475,9 +475,9 @@ async function run(){
   B.disabled=false;B.textContent='🚀 开始抓取';
 }
 function showTab(t){
-  document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
-  document.getElementById('tab-media').style.display=t==='media'?'':'none';
-  document.getElementById('tab-monitor').style.display=t==='monitor'?'':'none';
+  document.getElementById('tab-batch').style.display=t==='batch'?'block':'none';
+  document.getElementById('tab-media').style.display=t==='media'?'block':'none';
+  document.getElementById('tab-monitor').style.display=t==='monitor'?'block':'none';
   // 更新按钮样式
   const batchBtn=document.getElementById('tabBatchBtn');
   const mediaBtn=document.getElementById('tabMediaBtn');
