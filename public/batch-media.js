@@ -102,7 +102,7 @@ async function runBatchMedia() {
       d.results.forEach(function(item, idx) {
         html += '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:12px">';
         html += '<div style="font-size:11px;color:#999;margin-bottom:6px">#' + (idx+1) + ' - ' + (item.category || 'General') + '</div>';
-        html += '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.5">' + (item.cnText || item.text || '[无文本]') + '</div>';
+        html += '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.5">' + (item.text || '[无文本]') + '</div>';
         html += '<div style="font-size:12px;color:#666;margin-bottom:8px">📎 ' + (item.images || 0) + ' 图片' + (item.video ? ' + 视频' : '') + '</div>';
         html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
         html += '<a href="' + (item.postUrl || '#') + '" target="_blank" style="font-size:11px;color:#1d9bf0;text-decoration:none">🔗 原帖</a>';
@@ -168,8 +168,8 @@ async function batchSendToFeishu() {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            content: item.cnText || item.text,
-            tags: item.cnTags + ' ' + item.origTags,
+            content: item.text,  // 使用原文，不用翻译
+            tags: item.origTags || item.cnTags || '',  // 优先原文标签
             images: item.images || 0,
             mediaType: item.mediaType || (item.video ? '视频' : '图片'),
             files: []  // 批量模式暂不上传附件（可以后续优化）
