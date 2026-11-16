@@ -355,9 +355,9 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 <div style="text-align:right;margin-bottom:-30px"><button class="btn" style="width:auto;padding:6px 14px;background:#f0f0f0;color:#333;font-size:11px;border:1px solid #ddd" onclick="toggleLang()" id="langBtn">EN</button></div>
 <div class="hero"><h1 data-i18n="title">X 内容工厂</h1><p data-i18n="subtitle">输入链接 → 自动抓取 → 配图下载</p></div>
 <div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px;position:relative;z-index:10">
-  <button class="btn" id="tabBatchBtn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px;cursor:pointer" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
-  <button class="btn" id="tabMediaBtn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px;cursor:pointer" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
-  <button class="btn" id="tabMonitorBtn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px;cursor:pointer" onclick="showTab('monitor')" data-i18n="tabMonitor">📡 监控</button>
+  <button class="btn" id="tabBatchBtn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px;cursor:pointer" data-i18n="tabBatch">📋 批量抓取</button>
+  <button class="btn" id="tabMediaBtn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px;cursor:pointer" data-i18n="tabMedia">🎬 媒体搬运</button>
+  <button class="btn" id="tabMonitorBtn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px;cursor:pointer" data-i18n="tabMonitor">📡 监控</button>
 </div>
 <div id="tab-batch">
 <div class="box">
@@ -654,6 +654,12 @@ async function sendToFeishu(postUrl,token){
     btn.textContent='📤 发送到飞书';
   }
 }
+// 绑定Tab按钮事件（DOMContentLoaded确保元素已加载）
+document.addEventListener('DOMContentLoaded',function(){
+  document.getElementById('tabBatchBtn')?.addEventListener('click',()=>showTab('batch'));
+  document.getElementById('tabMediaBtn')?.addEventListener('click',()=>showTab('media'));
+  document.getElementById('tabMonitorBtn')?.addEventListener('click',()=>showTab('monitor'));
+});
 </script>
 <script src="/batch-media.js"></script>
 <script>
