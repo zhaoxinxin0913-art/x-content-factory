@@ -1019,12 +1019,23 @@ const server=http.createServer(async(req,res)=>{
         
         // 上传到飞书
         const fileList=[...result.downloadedImgs.map(p=>path.join(jobDir,p)),...(result.videoFile?[path.join(jobDir,result.videoFile)]:[])];
+        
+        // 确定媒体类型
+        let mediaType='文字';
+        if(result.videoFile){
+          mediaType='视频';
+        }else if(result.downloadedImgs.length>0){
+          mediaType='图片';
+        }
+        
+        console.log(`📤 准备上传到飞书: ${fileList.length} 个文件`);
+        fileList.forEach(f=>console.log(`  - ${path.basename(f)}`));
+        
         const feishuResult=await uploadToFeishu({
           content:result.post.text,
-          cnText:result.post.cnText||'',
           tags:result.post.tags||'',
           images:result.downloadedImgs.length,
-          video:!!result.videoFile,
+          mediaType:mediaType,
           files:fileList
         });
         
