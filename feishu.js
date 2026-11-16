@@ -9,24 +9,7 @@ const BASE_ID = 'CRKhbWNx1aktJCslD3lc3jgIn5c'; // 新BASE_ID（2026-11-16更新�
 const TABLE_ID = 'tbl9czFw0SwKsffb'; // 新TABLE_ID（2026-11-16更新）
 const FOLDER_ID = 'I6GzftxwXlvw9AdOYx9c0jQ6n3c'; // 云空间文件夹ID
 
-// 字段映射
-const FIELDS = {
-  content: 'fldZfXeC45',       // 帖子内容（原文）
-  type: 'fldRKyXFT6',          // 帖子类型（图片/视频/文字）
-  tags: 'fldUJirSPl',          // Tag名称（原文标签）
-  anonymous: 'fldCWJOWAC',     // 是否匿名
-  region: 'fldchoPbq0',        // 帖子区域（TH/PH）
-  randomAccount: 'fldUYDtZYe', // 随机账号
-  attachments: 'fldvxFc4sV'    // 附件
-};
-
-// 选项ID映射
-const OPTIONS = {
-  type: {text: 'optxtfhyzT', image: 'optcgykl3n', video: 'opt9Ecyx4z'},
-  anonymous: {yes: 'opt8SySfqy', no: 'optx8h0BM8'},
-  region: {TH: 'optiSGf6In', PH: 'optjbZMlCE', OTHERS: 'opt3I3SuJ4'},
-  randomAccount: {yes: 'optFm5kS9h', no: 'optQLTpKfi'}
-};
+// 注意：飞书API创建记录时使用字段名称，而不是字段ID
 
 // 获取 tenant_access_token
 function getTenantToken() {
