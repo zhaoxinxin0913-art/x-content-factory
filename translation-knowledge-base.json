@@ -1,0 +1,62 @@
+{
+  "version": "2026-11-16.1",
+  "product": {
+    "name": "POPUP",
+    "positioning": "面向年轻用户的娱乐、直播社交、语音房、游戏化活动与会员体系 App",
+    "canonicalSource": "英文是术语与概念的标准源；中文、其他语言译文和场景说明只用于消歧。若场景说明与普通词义冲突，以场景说明和产品概念为准。",
+    "tone": "年轻、自然、简洁，优先采用当地社交 App 常见 UI 表达；支付、隐私、封禁和未成年人保护文案使用清楚、正式、不含糊的表达。"
+  },
+  "dnt": {
+    "match": "仅按完整词精确匹配；保持源文中的大小写和写法，不翻译、不音译，不做子串替换。",
+    "terms": ["POPUP", "MBTI", "VIP", "SVIP", "PK", "AI Me"],
+    "examples": [
+      "POPUP 命中时保留 POPUP；PopUp 或 Popup 保持其源文写法，不自动改成 POPUP。",
+      "AIME 与 CLAIMED 都不得因为包含 AI Me 或相似字母而触发 DNT。"
+    ]
+  },
+  "concepts": [
+    {
+      "group": "社交关系",
+      "rule": "Follow/Following/Followers 是免费的社交关注关系；Subscription/Subscribe/Subscriber 是付费或内容订阅。Fans 只有原文明示粉丝时才译为粉丝，不得与 Followers 自动互换。"
+    },
+    {
+      "group": "内容与动态",
+      "rule": "Post 是单条贴文；Feed 是内容流/动态消息；Activity 可能是通知动态或活动，必须结合 key、参考列和界面场景判断。View 作动词表示查看，Views 作统计指标表示浏览次数/观看次数。"
+    },
+    {
+      "group": "直播与房间角色",
+      "rule": "Room Owner 是房主；Host 是主持人或主播；Admin 是管理员；Moderator 是内容/房间管理角色；Audience/Viewer 是观众。角色不得互换。"
+    },
+    {
+      "group": "处置动作",
+      "rule": "Block 是用户关系层面的封锁；Kick/Remove from Room 是移出房间；Mute Account 是静音该用户内容；Mute Microphone 是关闭麦克风；Restriction 是功能限制；Suspension/Account Ban 是账号停权或封禁。"
+    },
+    {
+      "group": "虚拟经济",
+      "rule": "Coins、Diamonds、Points、EXP 和 Gifts 是不同资产或机制，不得互换。POPUP Coins 中 POPUP 保留原文，Coins 按术语表翻译。"
+    },
+    {
+      "group": "支付",
+      "rule": "Top Up/Recharge 是向 App 余额或虚拟币储值；Purchase 是购买；Subscription 是订阅；Withdraw/Withdrawal 是提领/提现；Refund 是退款；Rebate 是返利/回馈；Exchange/Redeem 是兑换。不得用同一译法混写。"
+    },
+    {
+      "group": "会员体系",
+      "rule": "Membership 是会员资格或会员体系；Benefit 是会员权益/福利；Privilege 是专属特权。三者不得合并为同一个含义。VIP/SVIP 为 DNT。"
+    },
+    {
+      "group": "匹配与麦位",
+      "rule": "Voice Match/Text Match/Match 是配对功能；Mic Seat 是语音房麦位；On Mic/Off Mic 是上麦/下麦状态。不要将 Match 理解为比赛，除非场景明确是 PK 或游戏赛事。"
+    }
+  ],
+  "formatRules": [
+    "保留占位符、HTML、URL、emoji、数字、百分号、换行符和 JSON 结构；只翻译人类可读的文字 value。",
+    "短按钮优先使用动词或当地 UI 惯用短语；标题、状态、错误提示不要机械套用同一种词性。",
+    "术语表中的锁定词优先级高于通用知识；待确认术语只作为消歧参考，不应被程序硬校验。",
+    "原文缺少足够上下文且不同译法会改变支付、封禁、隐私或未成年人保护含义时，必须标记人工复核，不得猜测。"
+  ],
+  "locales": {
+    "ko-KR": "韩国韩语；普通提示使用自然礼貌体，合规文案使用正式礼貌体；注意助词收音和分词。",
+    "zh-TW": "台湾繁体中文；使用台湾产品用语，不混入简体或香港特有表达。",
+    "ms-MY": "马来西亚马来语；不混入印度尼西亚语；按钮简洁，介词 di 分写、被动前缀 di- 连写。"
+  }
+}

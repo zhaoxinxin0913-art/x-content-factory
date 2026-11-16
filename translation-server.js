@@ -19,6 +19,36 @@ const PORT = 5051;
 // 模型配置（运行时可通过 /api/settings 修改，无需重启）
 // 三个模型各自独立：地址 + key + 模型名 + 可编辑 prompt。留空则用免费兜底引擎。
 const SETTINGS_FILE = path.join(__dirname, 'translation-settings.json');
+const KNOWLEDGE_BASE_FILE = path.join(__dirname, 'translation-knowledge-base.json');
+
+function loadProductKnowledgeBase() {
+  try {
+    return JSON.parse(fs.readFileSync(KNOWLEDGE_BASE_FILE, 'utf8'));
+  } catch (e) {
+    console.error('knowledge base load failed:', e.message);
+    return { version: 'missing', product: {}, dnt: { terms: [] }, concepts: [], formatRules: [], locales: {} };
+  }
+}
+let PRODUCT_KNOWLEDGE_BASE = loadProductKnowledgeBase();
+
+function productKnowledgeToPrompt(lang) {
+  const kb = PRODUCT_KNOWLEDGE_BASE || {};
+  const product = kb.product || {};
+  const dnt = kb.dnt || {};
+  const concepts = Array.isArray(kb.concepts) ? kb.concepts : [];
+  const formatRules = Array.isArray(kb.formatRules) ? kb.formatRules : [];
+  const locale = (kb.locales || {})[canonicalLang(lang)] || '';
+  const lines = [
+    `产品：${product.name || 'POPUP'}；${product.positioning || ''}`,
+    product.canonicalSource || '',
+    product.tone || '',
+    dnt.match ? `DNT规则：${dnt.match}` : '',
+    ...concepts.map(x => `${x.group}：${x.rule}`),
+    ...formatRules.map(x => `格式/风控：${x}`),
+    locale ? `本地区补充：${locale}` : ''
+  ].filter(Boolean);
+  return lines.length ? `\n\n【POPUP 产品知识库 v${kb.version || 'unknown'}】\n${lines.join('\n')}` : '';
+}
 
 // 各步默认 prompt（前端可改，占位符会在运行时替换）
 // A 可用: {targetLang} {sourceText} {glossary} {refs}   —— 翻译（主）
@@ -108,6 +138,22 @@ function modelIdWarnings(cfg) {
 }
 // 工具：填充 prompt 占位符
 function fillPrompt(tpl, vars) { return String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`)); }
+
+// 目标地区专项规则：无论用户是否自定义 A/B/C prompt，都会在运行时追加，避免只写“韩语/繁中/马来语”
+// 导致模型混入错误地区表达。规则只约束语言风格，不覆盖术语库中的产品固定译法。
+const LOCALE_RULES = {
+  'ko-KR': `使用韩国本地产品/UI表达。标题和按钮尽量简短；普通提示统一使用自然礼貌体，支付、封禁、隐私等正式文案使用正式礼貌体，同一条文案不得混用语体。区分用户屏蔽(차단)、踢出房间(내보내기)、功能/账号停权(이용 정지)。变量内容未知时避免直接在占位符后添加依赖收音的은/는、이/가、을/를，必要时重写句子。注意韩语分词、空格和数量单位。`,
+  'zh-TW': `使用台湾繁体中文本地化，不得只做简体转繁体，也不得混入中国大陆或香港地区专用表达。优先使用：追蹤、追蹤者、私訊、貼文、動態消息、儲值、提領、檢舉、封鎖、停權、帳號、設定、預設、影片、訊息、載入。区分封鎖用户、帳號停權、移出房間。整体语气年轻简洁，普通产品文案默认使用“你”。`,
+  'ms-MY': `使用马来西亚马来语，不得混入印度尼西亚语。按钮尽量省略第二人称；需要第二人称时统一使用anda，不混用awak/kamu。区分用户屏蔽(Sekat pengguna)、踢出房间(Keluarkan dari bilik)、账号停权(Penggantungan akaun)和提现(Pengeluaran)。地点介词di分写，被动前缀di-连写；数字后不要机械使用重复复数。除DNT及术语表明确允许项外，不得随意保留英文。`
+};
+function localeRulesToPrompt(lang) {
+  const code = canonicalLang(lang);
+  const rule = LOCALE_RULES[code];
+  return rule ? `\n\n【${langName(code)}专项本地化规则】\n${rule}` : '';
+}
+function fillLocalePrompt(tpl, vars, lang) {
+  return fillPrompt(tpl, vars) + productKnowledgeToPrompt(lang) + localeRulesToPrompt(lang);
+}
 // 工具：调用某个模型（支持 openai / openai-responses / anthropic 三种协议）
 async function callLLM(cfg, prompt, options = {}) {
   cfg = { ...cfg }; // settings endpoint mutates objects: freeze in-flight requests
@@ -221,15 +267,19 @@ const LANGS = {
   'en': { name: '英语',     google: 'en', flag: '🇬🇧' },
   'th': { name: '泰语',     google: 'th', flag: '🇹🇭' },
   'tl': { name: '菲律宾语', google: 'tl', flag: '🇵🇭' },
-  'ko': { name: '韩语',     google: 'ko', flag: '🇰🇷' },
+  'ko-KR': { name: '韩语（韩国）', google: 'ko', flag: '🇰🇷' },
+  'ms-MY': { name: '马来语（马来西亚）', google: 'ms', flag: '🇲🇾' },
   'de': { name: '德语',     google: 'de', flag: '🇩🇪' },
   'it': { name: '意大利语', google: 'it', flag: '🇮🇹' },
   'ru': { name: '俄语',     google: 'ru', flag: '🇷🇺' },
   'tr': { name: '土耳其语', google: 'tr', flag: '🇹🇷' },
   'zh-CN': { name: '简体中文', google: 'zh-CN', flag: '🇨🇳' },
-  'zh-TW': { name: '繁体中文', google: 'zh-TW', flag: '🇹🇼' }
+  'zh-TW': { name: '繁体中文（台湾）', google: 'zh-TW', flag: '🇹🇼' }
 };
-function langName(code) { return (LANGS[code] && LANGS[code].name) || code; }
+const LANG_ALIASES = { ko: 'ko-KR', ms: 'ms-MY' };
+function canonicalLang(code) { return LANG_ALIASES[code] || code; }
+function langConfig(code) { return LANGS[canonicalLang(code)]; }
+function langName(code) { return (langConfig(code) && langConfig(code).name) || code; }
 
 // 存储目录
 const UPLOAD_DIR = path.join(__dirname, 'translation-uploads');
@@ -260,13 +310,29 @@ function saveDB() {
 // 返回 { map: {原文:译法}, dntList: [...] }
 function buildGlossary(lang) {
   const map = { ...(DB.glossary || {}) };  // 单语言表(向后兼容)
-  const base = String(lang || '').toLowerCase().split('-')[0];  // ja-JP → ja
   for (const t of (DB.glossaryML || [])) {
     if (!t || !t.en) continue;
-    const tr = t[base] || t[lang];
+    const tr = termTranslationForLang(t, lang);
     if (tr && String(tr).trim()) map[t.en] = String(tr).trim();
   }
   return { map, dntList: DB.dnt || [] };
+}
+
+// 精确地区列优先于基础语种列：zh-TW 必须优先于 zh，ko-KR 优先于 ko，ms-MY 优先于 ms。
+function termTranslationForLang(term, lang) {
+  const raw = String(lang || '');
+  const canonical = canonicalLang(raw);
+  const base = canonical.toLowerCase().split('-')[0];
+  const candidates = [...new Set([canonical, raw, base])].filter(Boolean);
+  for (const key of candidates) {
+    if (term[key] != null && String(term[key]).trim()) return term[key];
+  }
+  const lowerKeys = Object.fromEntries(Object.keys(term || {}).map(k => [k.toLowerCase(), k]));
+  for (const key of candidates) {
+    const actual = lowerKeys[key.toLowerCase()];
+    if (actual && term[actual] != null && String(term[actual]).trim()) return term[actual];
+  }
+  return '';
 }
 
 // 文件上传配置
@@ -282,7 +348,7 @@ app.use(express.static(__dirname));
 // Google Translate 免费 API
 function translateWithGoogle(text, targetLang) {
   return new Promise((resolve) => {
-    const tl = (LANGS[targetLang] && LANGS[targetLang].google) || targetLang || 'en';
+    const tl = (langConfig(targetLang) && langConfig(targetLang).google) || targetLang || 'en';
     const encoded = encodeURIComponent(text.substring(0, 500));
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encoded}`;
 
@@ -307,7 +373,7 @@ function translateWithGoogle(text, targetLang) {
 function detectSourceLang(text) {
   if (/[\u4e00-\u9fff]/.test(text)) return 'zh-CN';
   if (/[\u3040-\u30ff]/.test(text)) return 'ja';
-  if (/[\uac00-\ud7af]/.test(text)) return 'ko';
+  if (/[\uac00-\ud7af]/.test(text)) return 'ko-KR';
   if (/[\u0e00-\u0e7f]/.test(text)) return 'th';
   return 'en';
 }
@@ -315,7 +381,7 @@ function detectSourceLang(text) {
 // MyMemory 免费翻译 API（无需 key，作为主兜底）
 function translateWithMyMemory(text, targetLang) {
   return new Promise((resolve) => {
-    const tl = (LANGS[targetLang] && LANGS[targetLang].google) || targetLang || 'en';
+    const tl = (langConfig(targetLang) && langConfig(targetLang).google) || targetLang || 'en';
     if (tl === 'zh-CN' || tl === 'zh-TW') { /* MyMemory 用 zh-CN */ }
     const sl = detectSourceLang(text);
     if (sl === tl) return resolve(text); // 同语言直接返回
@@ -413,7 +479,7 @@ async function modelA_generate(sourceText, targetLang, glossary = {}, refs = '',
   if (modelConfigured(cfg)) {
     try {
       const glossaryText = glossaryToPrompt(glossary, '请严格遵守');
-      const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
+      const prompt = fillLocalePrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' }, targetLang);
       const result = await callLLM(cfg, prompt);
       if (!validDraft(result)) throw new Error('Invalid translator draft response');
       return { translation: result.translation, confidence: result.confidence, model: cfg.model };
@@ -435,7 +501,7 @@ async function modelB_generate(sourceText, targetLang, glossary = {}, refs = '',
   if (modelConfigured(cfg)) {
     try {
       const glossaryText = glossaryToPrompt(glossary, '请严格遵守');
-      const prompt = fillPrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' });
+      const prompt = fillLocalePrompt(cfg.prompt, { targetLang: langName(targetLang), sourceText, glossary: glossaryText, refs: refs || '' }, targetLang);
       const result = await callLLM(cfg, prompt);
       if (!validDraft(result)) throw new Error('Invalid translator draft response');
       return { translation: result.translation, confidence: result.confidence, model: cfg.model };
@@ -499,7 +565,7 @@ async function modelC_arbitrate(sourceText, transA, transB, targetLang, glossary
   if (modelConfigured(cfg)) {
     try {
       const glossaryText = glossaryToPrompt(glossary, '请严格核对');
-      const prompt = fillPrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), glossary: glossaryText, refs: refs || '' });
+      const prompt = fillLocalePrompt(cfg.prompt, { sourceText, transA, transB, targetLang: langName(targetLang), glossary: glossaryText, refs: refs || '' }, targetLang);
       const r = await callLLM(cfg, prompt);
       return normalizeCVerdict(r, transA, cfg.model);
     } catch (error) {
@@ -579,10 +645,19 @@ app.get('/api/status', (req, res) => {
     mode: active.length > 0 ? 'llm' : 'fallback',
     models: { A: m.A.model || '', B: m.B.model || '', C: m.C.model || '' },
     configured: { A: modelConfigured(m.A), B: modelConfigured(m.B), C: modelConfigured(m.C) },
+    knowledgeBase: {
+      version: PRODUCT_KNOWLEDGE_BASE.version || 'unknown',
+      conceptCount: Array.isArray(PRODUCT_KNOWLEDGE_BASE.concepts) ? PRODUCT_KNOWLEDGE_BASE.concepts.length : 0,
+      dntCount: Array.isArray(PRODUCT_KNOWLEDGE_BASE.dnt && PRODUCT_KNOWLEDGE_BASE.dnt.terms) ? PRODUCT_KNOWLEDGE_BASE.dnt.terms.length : 0
+    },
     message: active.length > 0
       ? `大模型模式（已配置 ${active.join('/')}）`
       : '兜底模式：MyMemory/Google 翻译 + 规则校验（未配置任何大模型）'
   });
+});
+
+app.get('/api/knowledge-base', (req, res) => {
+  res.json({ success: true, knowledgeBase: PRODUCT_KNOWLEDGE_BASE });
 });
 
 // 脱敏输出（apiKey 不回传明文）
@@ -945,7 +1020,7 @@ function buildAiReviewPrompt(r, lname, refs) {
 候选A：${r.translationA || ''}
 候选B：${r.translationB || ''}
 候选C(当前最终)：${r.translation || ''}
-被标记原因：${(r.reviewReason || r.divergence || '').slice(0, 200)}
+被标记原因：${(r.reviewReason || r.divergence || '').slice(0, 200)}${productKnowledgeToPrompt(r.targetLang)}${localeRulesToPrompt(r.targetLang)}
 
 只返回 JSON：{"final":"复核后的最终译文(原文是JSON则填结构一致的合法JSON字符串)"}`;
 }
@@ -1179,7 +1254,7 @@ app.post('/api/glossary', (req, res) => {
   res.json({ success: true, glossary: DB.glossary });
 });
 
-// 多语言术语库 + DNT：导入/查看。terms=[{en,zh,ja,fr,pt,es,...}], dnt=[...]
+// 多语言术语库 + DNT：导入/查看。terms=[{en,zh,ja,fr,pt,es,"ko-KR","zh-TW","ms-MY",...}], dnt=[...]
 app.get('/api/glossary-ml', (req, res) => {
   res.json({ success: true, terms: DB.glossaryML || [], dnt: DB.dnt || [] });
 });
@@ -1218,6 +1293,10 @@ app.get('/api/training-samples', (req, res) => {
 
 // 并发度：大模型可并行请求，兜底免费接口易被限流故保守
 const CONCURRENCY = Math.max(1, parseInt(process.env.TRANSLATE_CONCURRENCY || '20', 10) || 20);
+// 部分流水线单测会单独加载本段核心代码；完整服务中使用地区规则版，隔离测试中兼容原 fillPrompt。
+const fillLocaleAwarePrompt = typeof fillLocalePrompt === 'function'
+  ? fillLocalePrompt
+  : ((tpl, vars) => fillPrompt(tpl, vars));
 // 关闭免费引擎兜底：模型失败时不用 MyMemory/Google 充数，标记为未翻译并在整窗失败时熔断。
 const NO_FALLBACK = /^(1|true|yes)$/i.test(process.env.NO_FALLBACK || '');
 
@@ -1448,14 +1527,14 @@ async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
   }
   const run = step => {
     const cfg = models[step];
-    const sharedPrompt = fillPrompt(cfg.prompt, {
+    const sharedPrompt = fillLocaleAwarePrompt(cfg.prompt, {
       targetLang:langName(lang), sourceText:'__ITEM_SOURCE_TEXT__',
       glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:'__ITEM_REFS__'
-    });
-    const items = realJobs.map(job => ({...job, sharedPrompt, prompt:fillPrompt(cfg.prompt, {
+    }, lang);
+    const items = realJobs.map(job => ({...job, sharedPrompt, prompt:fillLocaleAwarePrompt(cfg.prompt, {
       targetLang:langName(lang), sourceText:job.sourceText,
       glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:job.refs || ''
-    })}));
+    }, lang)}));
     return generateDrafts({step,items,cfg,cache:draftCache,stats:task.abDraftStats,configured:modelConfigured(cfg),call:callLLM,
       single: (job, frozenCfg) => (step === 'A' ? modelA_generate : modelB_generate)(job.sourceText,lang,gloss,job.refs,frozenCfg)});
   };
@@ -1483,10 +1562,10 @@ async function arbitrateWindow(jobs, lang) {
   }
   const gloss = jobs[0] ? jobs[0].gloss : { map:{}, dntList:[] };
   const glossaryText = glossaryToPrompt(gloss, '请严格核对');
-  const sharedPrompt = fillPrompt(cfg.prompt, {
+  const sharedPrompt = fillLocaleAwarePrompt(cfg.prompt, {
     sourceText:'__ITEM_SOURCE_TEXT__', transA:'__ITEM_A__', transB:'__ITEM_B__',
     targetLang: langName(lang), glossary: glossaryText, refs:'__ITEM_REFS__'
-  });
+  }, lang);
   const items = jobs.map(j => ({
     id: j.id, sourceText: j.sourceText, transA: j.aRes.translation, transB: j.bRes.translation, refs: j.refs || ''
   }));
@@ -1715,7 +1794,10 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
 
 // 测试可见：被 require 时导出纯函数供单测，直接运行时才启动服务
 if (require.main !== module) {
-  module.exports = { programChecks, jsonStructCheck, jsonSkeleton, tryParseJson, detectHighRisk, isPureMediaLink };
+  module.exports = {
+    programChecks, jsonStructCheck, jsonSkeleton, tryParseJson, detectHighRisk, isPureMediaLink,
+    canonicalLang, langName, localeRulesToPrompt, productKnowledgeToPrompt, termTranslationForLang
+  };
 }
 
 if (require.main === module) app.listen(PORT, () => {

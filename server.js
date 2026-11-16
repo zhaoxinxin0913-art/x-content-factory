@@ -354,10 +354,10 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
 </style></head><body><div class="c">
 <div style="text-align:right;margin-bottom:-30px"><button class="btn" style="width:auto;padding:6px 14px;background:#f0f0f0;color:#333;font-size:11px;border:1px solid #ddd" onclick="toggleLang()" id="langBtn">EN</button></div>
 <div class="hero"><h1 data-i18n="title">X 内容工厂</h1><p data-i18n="subtitle">输入链接 → 自动抓取 → 配图下载</p></div>
-<div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px">
-  <button class="btn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
-  <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
-  <button class="btn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px" onclick="showTab('monitor')" data-i18n="tabMonitor">📡 监控</button>
+<div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px;position:relative;z-index:10">
+  <button class="btn" id="tabBatchBtn" style="width:auto;padding:10px 24px;background:#000;color:#fff;font-size:13px;cursor:pointer" onclick="showTab('batch')" data-i18n="tabBatch">📋 批量抓取</button>
+  <button class="btn" id="tabMediaBtn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px;cursor:pointer" onclick="showTab('media')" data-i18n="tabMedia">🎬 媒体搬运</button>
+  <button class="btn" id="tabMonitorBtn" style="width:auto;padding:10px 24px;background:#fff;color:#000;border:1.5px solid #000;font-size:13px;cursor:pointer" onclick="showTab('monitor')" data-i18n="tabMonitor">📡 监控</button>
 </div>
 <div id="tab-batch">
 <div class="box">
@@ -478,6 +478,25 @@ function showTab(t){
   document.getElementById('tab-batch').style.display=t==='batch'?'':'none';
   document.getElementById('tab-media').style.display=t==='media'?'':'none';
   document.getElementById('tab-monitor').style.display=t==='monitor'?'':'none';
+  // 更新按钮样式
+  const batchBtn=document.getElementById('tabBatchBtn');
+  const mediaBtn=document.getElementById('tabMediaBtn');
+  const monitorBtn=document.getElementById('tabMonitorBtn');
+  if(batchBtn){
+    batchBtn.style.background=t==='batch'?'#000':'#fff';
+    batchBtn.style.color=t==='batch'?'#fff':'#000';
+    batchBtn.style.border=t==='batch'?'none':'1.5px solid #000';
+  }
+  if(mediaBtn){
+    mediaBtn.style.background=t==='media'?'#000':'#fff';
+    mediaBtn.style.color=t==='media'?'#fff':'#000';
+    mediaBtn.style.border=t==='media'?'none':'1.5px solid #000';
+  }
+  if(monitorBtn){
+    monitorBtn.style.background=t==='monitor'?'#000':'#fff';
+    monitorBtn.style.color=t==='monitor'?'#fff':'#000';
+    monitorBtn.style.border=t==='monitor'?'none':'1.5px solid #000';
+  }
 }
 async function saveMonitor(){
   const list=document.getElementById('monList').value.trim(),token=document.getElementById('monToken').value.trim(),freq=document.getElementById('monFreq').value;
