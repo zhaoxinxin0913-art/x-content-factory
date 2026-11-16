@@ -686,26 +686,22 @@ async function scrapePost(postUrl,token){
     const p=await b.newPage();await p.setViewport({width:1280,height:900});
     await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
     await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-    await new Promise(r=>setTimeout(r,1000));
+    await new Promise(r=>setTimeout(r,300)); // 优化：1000→300ms
     await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
     
-    // 等待主推文加载（增加容错：3次重试）
+    // 优化：快速轮询替代waitForSelector
     let tweetFound=false;
-    for(let i=0;i<3;i++){
-      try{
-        await p.waitForSelector('[data-testid="tweet"]',{timeout:12000});
-        tweetFound=true;
-        break;
-      }catch(e){
-        console.log(`⚠️ 第${i+1}次加载失败，重试...`);
-        if(i<2){await new Promise(r=>setTimeout(r,2000));await p.reload({waitUntil:'domcontentloaded'});}
-      }
+    for(let i=0;i<5;i++){ // 增加到5次，但每次更快
+      await new Promise(r=>setTimeout(r,600)); // 轮询间隔600ms
+      tweetFound=await p.evaluate(()=>!!document.querySelector('article[data-testid="tweet"]'));
+      if(tweetFound)break;
+      if(i===2)await p.reload({waitUntil:'domcontentloaded'}); // 第3次失败才重载
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
     
-    // 快速滚动触发视频加载
+    // 优化：减少视频加载等待
     await p.evaluate(()=>window.scrollBy(0,300));
-    await new Promise(r=>setTimeout(r,1500));
+    await new Promise(r=>setTimeout(r,600)); // 优化：1500→600ms
 
     // 提取主帖内容
     const post=await p.evaluate(()=>{
@@ -719,7 +715,7 @@ async function scrapePost(postUrl,token){
         let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
         return src;
       });
-      // 视频检测（多种方式）
+      // 视频检测
       const videoInTweet = !!tweet.querySelector('video');
       const videoPlayerTestId = !!tweet.querySelector('[data-testid="videoPlayer"]');
       const videoGlobal = !!document.querySelector('video');
@@ -728,7 +724,6 @@ async function scrapePost(postUrl,token){
       
       const hasVideo = videoInTweet || videoPlayerTestId || videoGlobal || videoTestIdPartial || videoAriaLabel;
       
-      // 调试信息
       const videoDebug = {
         videoInTweet,
         videoPlayerTestId,
@@ -743,24 +738,10 @@ async function scrapePost(postUrl,token){
       return{text,time,aria,imgs,hasVideo,handle,videoDebug};
     });
 
-    // 抓取评论（前20条热门）
-    await p.evaluate(()=>window.scrollBy(0,1500));
-    await new Promise(r=>setTimeout(r,2000));
-    const comments=await p.evaluate(()=>{
-      const tweets=[...document.querySelectorAll('article[data-testid="tweet"]')];
-      return tweets.slice(1,21).map(t=>{
-        const text=t.querySelector('[data-testid="tweetText"]')?.innerText||'';
-        const aria=t.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
-        const links=t.querySelectorAll('a[role="link"][href^="/"]');
-        let handle='';links.forEach(l=>{const h=l.getAttribute('href');if(h&&!h.includes('/status/')&&h.startsWith('/'))handle=h.replace('/','');});
-        const likes=parseInt(((aria.match(/(\\d[\\d,]*)\\s*like/)||['','0'])[1]).replace(/,/g,''))||0;
-        return{handle,text:text.substring(0,300),likes};
-      }).filter(c=>c.text.length>5).sort((a,b)=>b.likes-a.likes);
-    });
-
-    return{post,comments};
+    // 优化：跳过评论抓取（媒体搬运不需要）
+    return{post,comments:[]};
   } finally {
-    await b.close(); // 确保浏览器一定关闭
+    await b.close();
   }
 }
 
@@ -775,17 +756,24 @@ async function downloadMedia(postUrl,token,jobDir){
     console.log('🔍 视频检测详情:', JSON.stringify(post.videoDebug));
   }
 
-  // 下载图片
+  // 优化：并发下载图片（方案2）
   const downloadedImgs=[];
-  for(let i=0;i<post.imgs.length;i++){
-    const imgUrl=post.imgs[i];
+  const downloadImage=async(imgUrl,index)=>{
     const ext=imgUrl.includes('format=png')?'png':'jpg';
-    const fname=`img_${String(i+1).padStart(2,'0')}.${ext}`;
+    const fname=`img_${String(index+1).padStart(2,'0')}.${ext}`;
     try{
-      const{execSync}=require('child_process');
-      execSync(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000});
-      downloadedImgs.push('media/'+fname);
+      const{exec}=require('child_process');
+      await new Promise((resolve,reject)=>{
+        exec(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000},(err)=>{
+          if(err)reject(err);else{downloadedImgs.push('media/'+fname);resolve();}
+        });
+      });
     }catch(e){/* skip */}
+  };
+  // 最多5个并发
+  const concurrency=5;
+  for(let i=0;i<post.imgs.length;i+=concurrency){
+    await Promise.all(post.imgs.slice(i,i+concurrency).map((url,idx)=>downloadImage(url,i+idx)));
   }
 
   // 下载视频（用 yt-dlp）
@@ -801,7 +789,8 @@ async function downloadMedia(postUrl,token,jobDir){
 .x.com\tTRUE\t/\tTRUE\t0\tauth_token\t${token}
 .x.com\tTRUE\t/\tTRUE\t0\tct0\t${ct0}
 `);
-      const output = execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}"`,{timeout:120000,encoding:'utf8'});
+      // 优化：限制格式和分辨率，加速下载（方案3）
+      const output = execSync(`yt-dlp --cookies "${cookieFile}" -f "best[ext=mp4][height<=720]/best[ext=mp4]/best" -o "${path.join(mediaDir,'video.mp4')}" "${postUrl}"`,{timeout:120000,encoding:'utf8'});
       console.log('yt-dlp输出:', output.substring(0, 200));
       if(fs.existsSync(path.join(mediaDir,'video.mp4'))){
         videoFile='media/video.mp4';

@@ -84,7 +84,8 @@ async function reviewWith(final, source='Follow %s') {
   const result={id:'r',taskId:'t',rowIndex:0,sourceText:source,targetLang:'zh-TW',needsReview:true,route:'human'};
   const db={reviews:[]}; const job={done:0,failed:0,fixed:0,jsonFixed:0};
   const sandbox={DB:db,callLLM:async()=>({final}),buildAiReviewPrompt:()=>'',buildRefs:()=>'',langName:x=>x,
-    buildGlossary:()=>({map:{Follow:'追蹤'},dntList:['POPUP']}), programChecks:server.programChecks,tryParseJson:server.tryParseJson,saveDB(){}};
+    buildGlossary:()=>({map:{Follow:'追蹤'},dntList:['POPUP']}), isPureMediaLink:server.isPureMediaLink,
+    programChecks:server.programChecks,tryParseJson:server.tryParseJson,saveDB(){}};
   vm.createContext(sandbox); vm.runInContext(worker,sandbox);
   await sandbox.runAiReview({id:'t',data:[[source]]},[result],{},job);
   return {db,job,result};

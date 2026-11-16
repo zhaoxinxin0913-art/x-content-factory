@@ -1078,7 +1078,11 @@ async function runAiReview(task, targets, cfg, job) {
       const r = targets[idx++];
       try {
         const row = task.data[r.rowIndex] || [];
-        const out = await callLLM(cfg, buildAiReviewPrompt(r, langName(r.targetLang), buildRefs(task, row, r.targetLang, r.sourceText)), { maxTokens: 4096 });
+        // Historical tasks can still contain links in the review queue. Repair
+        // these deterministically without spending an extra review-model call.
+        const skipLink = isPureMediaLink(r.sourceText);
+        const out = skipLink ? { final: r.sourceText }
+          : await callLLM(cfg, buildAiReviewPrompt(r, langName(r.targetLang), buildRefs(task, row, r.targetLang, r.sourceText)), { maxTokens: 4096 });
         let final = (out && (out.final || out.final_translation)) || '';
         if (!final) { job.failed++; continue; }
         final = String(final);
@@ -1096,8 +1100,9 @@ async function runAiReview(task, targets, cfg, job) {
         if (!DB.reviews.find(rv => rv.resultId === r.id)) {          // 幂等：不重复写
           DB.reviews.push({ id: `review_ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             taskId: task.id, resultId: r.id, decision: 'fix', finalText: final,
-            reviewer: 'ai-opus', programChecks: checked.issues, reviewTime: new Date().toISOString() });
+            reviewer: skipLink ? 'rule-link-skip' : 'ai-opus', programChecks: checked.issues, reviewTime: new Date().toISOString() });
           job.fixed++;
+          if (skipLink) job.skippedLinks = (job.skippedLinks || 0) + 1;
         }
       } catch (e) { job.failed++; }
       finally { job.done++; if (job.done % 10 === 0) saveDB(); }
@@ -1421,10 +1426,13 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   if (srcNums !== outNums) issues.push('数字/金额不一致');
   // 6. 强制术语命中（宽松：术语表锁定"概念"，允许目标语语法变形，故用词干前缀匹配而非全等）
   //    如 Invite→Invitación，模型用 Invitar(动词变形)也算命中；避免死板字符串误判
-  const activeTerms = new Set(matchSourceTerms(src, Object.keys(glossary || {})).map(m => m.term));
+  // URL paths/query strings are protected resources, not translatable prose.
+  const withoutLinks = s => extractContentLinks(s).reduce((text, link) => text.split(link).join(''), s);
+  const srcTerms = withoutLinks(src), outTerms = withoutLinks(out);
+  const activeTerms = new Set(matchSourceTerms(srcTerms, Object.keys(glossary || {})).map(m => m.term));
   for (const [k, v] of Object.entries(glossary || {})) {
     if (!v || !activeTerms.has(k)) continue;
-    const outL = out.toLowerCase(), vL = String(v).toLowerCase();
+    const outL = outTerms.toLowerCase(), vL = String(v).toLowerCase();
     if (outL.includes(vL)) continue;                       // 完全包含 → 命中
     // 取译法的主词（最长的词），用前6字符(或更短)作词干，命中即算(容忍性数/冠词/变位)
     const mainWord = vL.split(/[\s/、,，]+/).filter(Boolean).sort((a, b) => b.length - a.length)[0] || vL;
@@ -1434,9 +1442,9 @@ function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   }
   // Preserve each actual source spelling, including PopUp/Popup, and counts.
   const protectedForms = new Map();
-  for (const m of matchSourceTerms(src, dntList)) protectedForms.set(m.text, (protectedForms.get(m.text) || 0) + 1);
+  for (const m of matchSourceTerms(srcTerms, dntList)) protectedForms.set(m.text, (protectedForms.get(m.text) || 0) + 1);
   for (const [form, count] of protectedForms) {
-    if (matchSourceTerms(out, [form], true).length !== count) issues.push(`DNT未原样保留: ${form}`);
+    if (matchSourceTerms(outTerms, [form], true).length !== count) issues.push(`DNT未原样保留: ${form}`);
   }
   // 7. 译文疑似未翻译（译文与原文完全相同且含英文字母）——仅对"真正的句子"判定
   //    排除: DNT词/纯标识符/极短词/单词或短标签(如Total/View/Start，很多语言本就同形或合法保留)
@@ -1548,9 +1556,8 @@ function classifyRoute(cRes, progCheck, transA, transB, sourceText) {
   // A/B agreement must not override an explicit C rejection or low score.
   if (score < 70 || d.needs_human_review === true || decision === 'human_review') return 'human';
 
-  // 【A/B 独立一致豁免】两个独立模型译出完全相同结果 + 程序检查全过 → 最强正确性信号
-  // 非高危 → 直接自动通过(彻底放行,忽略C的medium/human_review/rewrite等软性判断,不再出现在复核台)
-  // 高危(支付/安全/隐私/处罚/未成年) → 抽查(留一道人眼,但不占人工必审)
+  // Agreement is supporting evidence only: C's final must also match the draft.
+  // Explicit C vetoes above win; medium/high risks or rewrite still need review.
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const abIdentical = norm(transA) && norm(transA) === norm(transB);
   const finalMatchesDraft = norm(cRes.final) === norm(transA);
@@ -1623,7 +1630,7 @@ async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
       column: ci, header: task.headers[ci], value: task.data[rowIndex][ci], type: (task.refTypes || {})[ci]
     }));
     return {id:`row:${rowIndex}`, rowIndex, sourceText, refs, gloss,
-      media: isPureMediaLink(sourceText),   // 纯媒体链接：跳过翻译，不送 A/B/C
+      media: isPureMediaLink(sourceText),   // 纯链接/资源路径：跳过翻译，不送 A/B/C
       context:{sourceText,targetLang:lang,refs,rawRefs,glossary:gloss,models,
         glossaryData: {glossary:DB.glossary,glossaryML:DB.glossaryML,dnt:DB.dnt}}};
   });
@@ -1707,10 +1714,10 @@ async function arbitrateWindow(jobs, lang) {
 // and resource filenames/paths. Never fetch links; recognition is local only.
 function isPureMediaLink(text) {
   const s = String(text == null ? '' : text).trim();
-  if (!s || /[\s<>"'`]/u.test(s)) return false;
+  if (!s || /[\s<>"'`\u3000-\u303f\uff00-\uffef]/u.test(s)) return false;
   if (/^(?:https?:\/\/|\/\/|www\.)[^/?#\s]+(?:[/?#][^\s]*)?$/iu.test(s)) return true;
   if (/^mailto:[^\s@?]+@[^\s@?]+(?:\?[^\s]*)?$/i.test(s)) return true;
-  return /^(?:\.?\.?\/)?[^\s?#]+\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|mov|webm|avi|pdf)(?:[?#][^\s]*)?$/i.test(s);
+  return /^(?:\.?\.?\/)?[^\s:?#()[\]{}]+\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|mov|webm|avi|pdf)(?:[?#][^\s]*)?$/i.test(s);
 }
 
 function extractContentLinks(text) {
@@ -1727,7 +1734,7 @@ function extractContentLinks(text) {
 
 // 组装单条结果（主流程与补翻共用，保证分档/复核原因逻辑完全一致）
 function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gloss) {
-  // 【媒体链接守卫】原文是纯图片/媒体链接 → 不翻译，原样保留，直接自动通过，跳过所有程序检查与分流
+  // 纯链接/资源路径由程序原样回填，未调用模型，不需要翻译复核。
   if (isPureMediaLink(sourceText)) {
     return {
       id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -1793,7 +1800,7 @@ async function retranslateFailed(taskId) {
   for (const lang of langs) {
     // 需补：缺失 或 现有结果 needsRetranslate
     const rows = valid.filter(i => {
-      if (String(task.data[i][col]).length > MAX_SRC) { summary.skippedLong++; return false; }
+      if (String(task.data[i][col]).length > MAX_SRC && !isPureMediaLink(task.data[i][col])) { summary.skippedLong++; return false; }
       const cur = DB.results.find(r => r.taskId === taskId && r.rowIndex === i && r.targetLang === lang);
       return !cur || needsRetranslate(cur);
     });

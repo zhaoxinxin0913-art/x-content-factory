@@ -699,6 +699,11 @@ async function poll(){
     $('#stAuto').textContent=p.autoCount||0;
     $('#stSpot').textContent=p.spotCount||0;
     $('#stReview').textContent=p.humanCount!=null?p.humanCount:p.needsReviewCount;
+    if(res.status==='aborted'){
+      clearInterval(state.pollTimer);
+      $('#progSpin').textContent='翻译已中断，已有结果已保留。请检查模型配置后补翻失败条目。';
+      toast('任务已中断，不会继续消耗模型额度；已有结果已保留。','err');
+    }
     if(res.status==='completed'){
       clearInterval(state.pollTimer);
       // 完成后拉一次完整结果供复核/导出
