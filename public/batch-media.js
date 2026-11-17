@@ -164,6 +164,24 @@ async function batchSendToFeishu() {
     
     await Promise.allSettled(batch.map(async (item) => {
       try {
+        // 构建完整文件路径列表
+        const fileList = [];
+        
+        // 添加图片路径
+        if (item.imagePaths && item.imagePaths.length > 0) {
+          item.imagePaths.forEach(imgPath => {
+            // imgPath格式: 'media/img_01.jpg'
+            const fullPath = item.outputDir + '/' + imgPath;
+            fileList.push(fullPath);
+          });
+        }
+        
+        // 添加视频路径
+        if (item.videoPath) {
+          const fullPath = item.outputDir + '/' + item.videoPath;
+          fileList.push(fullPath);
+        }
+        
         const res = await fetch('/api/send-to-feishu-batch', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -172,7 +190,7 @@ async function batchSendToFeishu() {
             tags: item.origTags || item.cnTags || '',  // 优先原文标签
             images: item.images || 0,
             mediaType: item.mediaType || (item.video ? '视频' : '图片'),
-            files: []  // 批量模式暂不上传附件（可以后续优化）
+            files: fileList  // 传递完整文件路径列表
           })
         });
         
