@@ -103,16 +103,20 @@ module.exports = async function handleBatchMedia(body, OUTPUT, downloadMedia, tr
       console.error(`   原因: ${error?.message || error}`);
       results.push({
         status: 'rejected',
-        reason: error
+        reason: {
+          index: idx,
+          url: url,
+          message: error?.message || String(error)
+        }
       });
     }
   }
   
   // 统计结果
   const succeeded = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-  const failed = results.filter(r => r.status === 'rejected').map((r, i) => ({
-    index: i,
-    url: urls[i],
+  const failed = results.filter(r => r.status === 'rejected').map(r => ({
+    index: r.reason.index || 0,
+    url: r.reason.url || '',
     error: r.reason?.message || String(r.reason)
   }));
   
