@@ -11,13 +11,13 @@ const THAI=/[\u0E00-\u0E7F]/;
 (async()=>{
   const b=await puppeteer.launch({
     executablePath:CHROME_PATH,
-    headless:'new',
-    args:['--no-sandbox','--disable-setuid-sandbox','--no-proxy-server','--proxy-server=direct://','--disable-blink-features=AutomationControlled','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36']
+    headless:true,
+    args:['--no-sandbox','--disable-setuid-sandbox','--proxy-server=http://127.0.0.1:7890','--disable-blink-features=AutomationControlled','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36']
   });
   const p=await b.newPage();
   await p.setViewport({width:1280,height:900});
   await p.setExtraHTTPHeaders({'Accept-Language':'th-TH,th;q=0.9,en;q=0.8'});
-  await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:20000});
+  await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:60000});
   await p.evaluate((t,c)=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;document.cookie=`ct0=${c}; domain=.x.com; path=/`;},TOKEN,CT0);
   await new Promise(r=>setTimeout(r,1200));
   await p.goto(`https://x.com/${HANDLE}`,{waitUntil:'domcontentloaded',timeout:60000});

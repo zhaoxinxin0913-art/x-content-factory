@@ -1112,7 +1112,39 @@ const server=http.createServer(async(req,res)=>{
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
       try{
         const data=JSON.parse(body);
-        const feishuResult=await uploadToFeishu(data);
+        
+        // 构建完整文件路径列表（服务器端处理）
+        const fileList = [];
+        
+        // 添加图片路径
+        if (data.imagePaths && data.imagePaths.length > 0) {
+          data.imagePaths.forEach(imgPath => {
+            // imgPath格式: 'media/img_01.jpg'
+            const fullPath = path.join(data.outputDir, imgPath);
+            if (fs.existsSync(fullPath)) {
+              fileList.push(fullPath);
+            }
+          });
+        }
+        
+        // 添加视频路径
+        if (data.videoPath) {
+          const fullPath = path.join(data.outputDir, data.videoPath);
+          if (fs.existsSync(fullPath)) {
+            fileList.push(fullPath);
+          }
+        }
+        
+        console.log(`📤 批量发送: ${fileList.length} 个附件`);
+        
+        // 上传到飞书
+        const feishuResult=await uploadToFeishu({
+          content: data.content,
+          tags: data.tags,
+          images: data.images,
+          mediaType: data.mediaType,
+          files: fileList
+        });
         
         if(feishuResult.success){
           res.writeHead(200,{'Content-Type':'application/json'});
