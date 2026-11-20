@@ -11,8 +11,8 @@ module.exports = async function handleBatchMedia(body, OUTPUT, downloadMedia, tr
   if (!token) {
     return { error: '需要 token' };
   }
-  if (urls.length > 10) {
-    return { error: '单次最多处理10个链接' };
+  if (urls.length > 20) {
+    return { error: '单次最多处理20个链接' };
   }
   
   console.log(`📦 开始批量处理 ${urls.length} 个帖子...`);

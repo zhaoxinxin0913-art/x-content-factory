@@ -387,13 +387,13 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <p class="dsc" data-i18n="mediaDesc">输入单条或多条帖子链接，提取文案、图片/视频、优质评论</p>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <button class="btn" style="width:auto;padding:8px 16px;background:#000;color:#fff;font-size:12px" onclick="switchMediaMode('single')" id="modeSingle">单条</button>
-    <button class="btn" style="width:auto;padding:8px 16px;background:#fff;color:#000;border:1.5px solid #000;font-size:12px" onclick="switchMediaMode('batch')" id="modeBatch">批量 (最多10条)</button>
+    <button class="btn" style="width:auto;padding:8px 16px;background:#fff;color:#000;border:1.5px solid #000;font-size:12px" onclick="switchMediaMode('batch')" id="modeBatch">批量 (最多20条)</button>
   </div>
   <div id="single-mode">
     <input class="inp" id="murl" data-ph="phMediaUrl" placeholder="https://x.com/用户名/status/帖子ID">
   </div>
   <div id="batch-mode" style="display:none">
-    <textarea class="inp" id="burls" rows="8" style="resize:vertical;font-family:monospace;font-size:12px" placeholder="每行一个链接，最多10条，例如：&#10;https://x.com/user1/status/123&#10;https://x.com/user2/status/456&#10;https://x.com/user3/status/789"></textarea>
+    <textarea class="inp" id="burls" rows="8" style="resize:vertical;font-family:monospace;font-size:12px" placeholder="每行一个链接，最多20条，例如：&#10;https://x.com/user1/status/123&#10;https://x.com/user2/status/456&#10;https://x.com/user3/status/789"></textarea>
     <p style="font-size:11px;color:#999;margin:4px 0">💡 支持同时处理多个帖子，自动并发下载</p>
   </div>
   <h2 style="margin-top:14px" data-i18n="lblToken2">🔐 Auth Token</h2>
@@ -681,6 +681,7 @@ runMedia = async function() {
 // 浏览器连接池（性能优化）
 // ============================================================
 let browserInstance = null;
+let browserUseCount = 0; // 浏览器使用次数计数器
 let browserLastUsed = Date.now();
 const BROWSER_TIMEOUT = 5 * 60 * 1000; // 5分钟不用就关闭
 
@@ -692,12 +693,25 @@ async function getBrowser() {
     try {
       // 测试浏览器是否还活着
       await browserInstance.version();
-      browserLastUsed = now;
-      console.log('♻️  复用现有浏览器实例');
-      return browserInstance;
+      
+      // 批量处理时，每10次操作强制重启浏览器（刷新Cookie状态）
+      if (browserUseCount > 10) {
+        console.log('🔄 浏览器已使用10次，重启以刷新状态');
+        try {
+          await browserInstance.close();
+        } catch (e) {}
+        browserInstance = null;
+        browserUseCount = 0;
+      } else {
+        browserLastUsed = now;
+        browserUseCount++;
+        console.log(`♻️  复用现有浏览器实例 (使用次数: ${browserUseCount})`);
+        return browserInstance;
+      }
     } catch (e) {
       console.log('⚠️  浏览器实例失效，重新创建');
       browserInstance = null;
+      browserUseCount = 0;
     }
   }
   
@@ -715,6 +729,7 @@ async function getBrowser() {
     ]
   });
   browserLastUsed = now;
+  browserUseCount = 0;
   
   // 5分钟后自动关闭
   setTimeout(async () => {
@@ -724,6 +739,7 @@ async function getBrowser() {
         await browserInstance.close();
       } catch (e) {}
       browserInstance = null;
+      browserUseCount = 0;
     }
   }, BROWSER_TIMEOUT);
   
@@ -740,7 +756,23 @@ async function scrapePost(postUrl,token){
     await p.setViewport({width:1280,height:900});
     await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
     await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
-    await new Promise(r=>setTimeout(r,300)); // 优化：1000→300ms
+    
+    // 验证Cookie是否设置成功
+    await new Promise(r=>setTimeout(r,300));
+    const cookieSet = await p.evaluate(()=>document.cookie.includes('auth_token'));
+    if (!cookieSet) {
+      console.log('⚠️  Cookie设置失败，重新尝试');
+      await p.setCookie({
+        name: 'auth_token',
+        value: token,
+        domain: '.x.com',
+        path: '/',
+        secure: true,
+        httpOnly: false
+      });
+      await new Promise(r=>setTimeout(r,500));
+    }
+    
     await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
     
     // 优化：快速轮询替代waitForSelector

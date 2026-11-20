@@ -38,7 +38,7 @@ async function runBatchMedia() {
   
   const urls = urlsText.split('\n').map(u => u.trim()).filter(u => u);
   if (urls.length === 0) return alert('请至少输入一个链接');
-  if (urls.length > 10) return alert('单次最多处理10条');
+  if (urls.length > 20) return alert('单次最多处理20条');
   
   MB.disabled = true;
   MB.textContent = '⏳ 批量处理中 (' + urls.length + '条)...';
