@@ -781,7 +781,7 @@ async function scrapePost(postUrl,token){
       await new Promise(r=>setTimeout(r,1000)); // 轮询间隔1秒
       
       // 检查是否加载到推文
-      tweetFound=await p.evaluate(()=>{
+      const checkResult = await p.evaluate(()=>{
         const tweet = document.querySelector('article[data-testid="tweet"]');
         const isLoginPage = document.querySelector('input[name="text"]'); // 登录页面
         const isLocked = document.querySelector('div[data-testid="error-detail"]'); // 账号被锁定
@@ -792,13 +792,13 @@ async function scrapePost(postUrl,token){
         };
       });
       
-      if(tweetFound.found) {
+      if(checkResult.found) {
         tweetFound = true;
         break;
       }
       
       // 如果是登录页面或账号被锁，直接失败
-      if(tweetFound.isLoginPage || tweetFound.isLocked){
+      if(checkResult.isLoginPage || checkResult.isLocked){
         console.log('   ❌ Auth Token失效或账号被锁定');
         throw new Error('Auth Token失效，请更新token');
       }
@@ -815,7 +815,7 @@ async function scrapePost(postUrl,token){
         await new Promise(r=>setTimeout(r,2000)); // reload后等待2秒
       }
     }
-    if(!tweetFound || !tweetFound.found)throw new Error('无法加载推文，请检查链接或 token 是否有效');
+    if(!tweetFound) throw new Error('无法加载推文，请检查链接或 token 是否有效');
     
     // 滚动触发懒加载（图片和视频）
     await p.evaluate(()=>{
