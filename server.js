@@ -795,9 +795,17 @@ async function scrapePost(postUrl,token){
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
     
-    // 优化：减少视频加载等待
-    await p.evaluate(()=>window.scrollBy(0,300));
-    await new Promise(r=>setTimeout(r,600)); // 优化：1500→600ms
+    // 滚动触发懒加载（图片和视频）
+    await p.evaluate(()=>{
+      window.scrollBy(0,300);
+      // 触发所有懒加载图片
+      const lazyImgs = document.querySelectorAll('img[loading="lazy"]');
+      lazyImgs.forEach(img => {
+        img.scrollIntoView();
+        img.loading = 'eager';
+      });
+    });
+    await new Promise(r=>setTimeout(r,1500)); // 恢复1500ms，确保图片加载
 
     // 提取主帖内容
     const post=await p.evaluate(()=>{
@@ -806,11 +814,30 @@ async function scrapePost(postUrl,token){
       const text=tweet.querySelector('[data-testid="tweetText"]')?.innerText||'';
       const time=tweet.querySelector('time')?.getAttribute('datetime')||'';
       const aria=tweet.querySelector('[role="group"]')?.getAttribute('aria-label')||'';
-      // 图片
-      const imgs=[...tweet.querySelectorAll('img[src*="pbs.twimg.com/media"]')].map(i=>{
-        let src=i.src;if(src.includes('name='))src=src.replace(/name=\w+/,'name=orig');else src+='?name=orig';
-        return src;
-      });
+      
+      // 图片提取（增强版：多种选择器）
+      const imgSelectors = [
+        'img[src*="pbs.twimg.com/media"]',
+        'img[alt*="Image"]',
+        'div[data-testid="tweetPhoto"] img',
+        'a[href*="/photo/"] img'
+      ];
+      
+      const imgSet = new Set();
+      for (const selector of imgSelectors) {
+        tweet.querySelectorAll(selector).forEach(img => {
+          if (img.src && img.src.includes('pbs.twimg.com/media')) {
+            let src = img.src;
+            if (src.includes('name=')) {
+              src = src.replace(/name=\w+/, 'name=orig');
+            } else {
+              src += '?name=orig';
+            }
+            imgSet.add(src);
+          }
+        });
+      }
+      const imgs = [...imgSet];
       // 视频检测
       const videoInTweet = !!tweet.querySelector('video');
       const videoPlayerTestId = !!tweet.querySelector('[data-testid="videoPlayer"]');
