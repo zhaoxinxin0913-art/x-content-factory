@@ -777,23 +777,45 @@ async function scrapePost(postUrl,token){
     
     // 轮询等待推文加载（增强版：更多次数，智能重试）
     let tweetFound=false;
-    for(let i=0;i<8;i++){ // 8次轮询，总共约6-8秒
-      await new Promise(r=>setTimeout(r,800)); // 轮询间隔800ms
-      tweetFound=await p.evaluate(()=>!!document.querySelector('article[data-testid="tweet"]'));
-      if(tweetFound)break;
+    for(let i=0;i<10;i++){ // 10次轮询
+      await new Promise(r=>setTimeout(r,1000)); // 轮询间隔1秒
+      
+      // 检查是否加载到推文
+      tweetFound=await p.evaluate(()=>{
+        const tweet = document.querySelector('article[data-testid="tweet"]');
+        const isLoginPage = document.querySelector('input[name="text"]'); // 登录页面
+        const isLocked = document.querySelector('div[data-testid="error-detail"]'); // 账号被锁定
+        return {
+          found: !!tweet,
+          isLoginPage: !!isLoginPage,
+          isLocked: !!isLocked
+        };
+      });
+      
+      if(tweetFound.found) {
+        tweetFound = true;
+        break;
+      }
+      
+      // 如果是登录页面或账号被锁，直接失败
+      if(tweetFound.isLoginPage || tweetFound.isLocked){
+        console.log('   ❌ Auth Token失效或账号被锁定');
+        throw new Error('Auth Token失效，请更新token');
+      }
       
       // 第3次失败时，尝试滚动页面（触发懒加载）
       if(i===2){
         await p.evaluate(()=>window.scrollBy(0,500));
       }
       
-      // 第5次失败时，重新加载页面
-      if(i===4){
+      // 第6次失败时，重新加载页面
+      if(i===5){
         console.log('   ⚠️  推文未加载，重新加载页面...');
         await p.reload({waitUntil:'domcontentloaded'});
+        await new Promise(r=>setTimeout(r,2000)); // reload后等待2秒
       }
     }
-    if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
+    if(!tweetFound || !tweetFound.found)throw new Error('无法加载推文，请检查链接或 token 是否有效');
     
     // 滚动触发懒加载（图片和视频）
     await p.evaluate(()=>{
