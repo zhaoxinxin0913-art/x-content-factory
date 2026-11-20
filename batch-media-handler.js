@@ -110,6 +110,13 @@ module.exports = async function handleBatchMedia(body, OUTPUT, downloadMedia, tr
         }
       });
     }
+    
+    // 请求间延迟，避免触发X限流（除了最后一个）
+    if (idx < urls.length - 1) {
+      const delay = 2000 + Math.random() * 1000; // 2-3秒随机延迟
+      console.log(`   ⏸️  等待 ${(delay/1000).toFixed(1)}秒后继续...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
   
   // 统计结果

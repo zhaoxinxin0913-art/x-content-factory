@@ -775,13 +775,23 @@ async function scrapePost(postUrl,token){
     
     await p.goto(postUrl,{waitUntil:'domcontentloaded',timeout:60000});
     
-    // 优化：快速轮询替代waitForSelector
+    // 轮询等待推文加载（增强版：更多次数，智能重试）
     let tweetFound=false;
-    for(let i=0;i<5;i++){ // 增加到5次，但每次更快
-      await new Promise(r=>setTimeout(r,600)); // 轮询间隔600ms
+    for(let i=0;i<8;i++){ // 8次轮询，总共约6-8秒
+      await new Promise(r=>setTimeout(r,800)); // 轮询间隔800ms
       tweetFound=await p.evaluate(()=>!!document.querySelector('article[data-testid="tweet"]'));
       if(tweetFound)break;
-      if(i===2)await p.reload({waitUntil:'domcontentloaded'}); // 第3次失败才重载
+      
+      // 第3次失败时，尝试滚动页面（触发懒加载）
+      if(i===2){
+        await p.evaluate(()=>window.scrollBy(0,500));
+      }
+      
+      // 第5次失败时，重新加载页面
+      if(i===4){
+        console.log('   ⚠️  推文未加载，重新加载页面...');
+        await p.reload({waitUntil:'domcontentloaded'});
+      }
     }
     if(!tweetFound)throw new Error('无法加载推文，请检查链接或 token 是否有效');
     
