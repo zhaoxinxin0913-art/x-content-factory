@@ -164,6 +164,12 @@ async function batchSendToFeishu() {
     
     await Promise.allSettled(batch.map(async (item) => {
       try {
+        // 防御性检查
+        if (!item.outputDir || !item.imagePaths) {
+          console.error('⚠️ 数据不完整:', item);
+          throw new Error('缺少outputDir或imagePaths');
+        }
+        
         const res = await fetch('/api/send-to-feishu-batch', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
