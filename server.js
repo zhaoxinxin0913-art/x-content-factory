@@ -1207,11 +1207,18 @@ const server=http.createServer(async(req,res)=>{
         // 构建完整文件路径列表（服务器端处理）
         const fileList = [];
         
+        console.log(`🔍 DEBUG - 收到的数据:`, {
+          imagePaths: data.imagePaths,
+          videoPath: data.videoPath,
+          outputDir: data.outputDir
+        });
+        
         // 添加图片路径
         if (data.imagePaths && data.imagePaths.length > 0) {
           data.imagePaths.forEach(imgPath => {
             // imgPath格式: 'media/img_01.jpg'
             const fullPath = path.join(data.outputDir, imgPath);
+            console.log(`🔍 检查图片: ${fullPath}, 存在: ${fs.existsSync(fullPath)}`);
             if (fs.existsSync(fullPath)) {
               fileList.push(fullPath);
             }
@@ -1221,6 +1228,7 @@ const server=http.createServer(async(req,res)=>{
         // 添加视频路径
         if (data.videoPath) {
           const fullPath = path.join(data.outputDir, data.videoPath);
+          console.log(`🔍 检查视频: ${fullPath}, 存在: ${fs.existsSync(fullPath)}`);
           if (fs.existsSync(fullPath)) {
             fileList.push(fullPath);
           }
