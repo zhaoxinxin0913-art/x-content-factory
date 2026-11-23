@@ -867,7 +867,7 @@ async function scrapePost(postUrl,token){
       const videoTestIdPartial = !!tweet.querySelector('div[data-testid*="video"]');
       const videoAriaLabel = !!tweet.querySelector('[aria-label*="video" i]') || !!tweet.querySelector('[aria-label*="Video" i]');
       
-      const hasVideo = videoInTweet || videoPlayerTestId || videoGlobal || videoTestIdPartial || videoAriaLabel;
+      const hasVideo = videoInTweet || videoPlayerTestId || videoTestIdPartial || videoAriaLabel;
       
       const videoDebug = {
         videoInTweet,

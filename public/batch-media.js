@@ -98,6 +98,8 @@ async function runBatchMedia() {
       html += '<h4 style="margin:20px 0 10px 0">📋 提取结果</h4>';
       // 保存结果到全局，供批量发送使用
       window.batchResults = d.results;
+      console.log('🔍 保存的批量结果:', window.batchResults);
+      console.log('🔍 第一条数据示例:', window.batchResults[0]);
       
       d.results.forEach(function(item, idx) {
         html += '<div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px;margin-bottom:12px">';
@@ -164,6 +166,14 @@ async function batchSendToFeishu() {
     
     await Promise.allSettled(batch.map(async (item) => {
       try {
+        console.log('🔍 准备发送到飞书的数据:', {
+          imagePaths: item.imagePaths,
+          videoPath: item.videoPath,
+          outputDir: item.outputDir,
+          handle: item.handle,
+          tweetId: item.tweetId
+        });
+        
         // 防御性检查
         if (!item.outputDir || !item.imagePaths) {
           console.error('⚠️ 数据不完整:', item);
