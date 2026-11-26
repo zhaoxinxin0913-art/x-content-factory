@@ -30,7 +30,26 @@
       "用标准马来语(Bahasa Melayu)，面向 web/app 用户，语气自然友好、口语化、避免生硬直译。",
       "保留所有占位符(%s/%1$s/#nickname#)与 emoji，位置可按马来语语序调整但语义角色不变。",
       "IT/社媒常用词优先采用当地 app 里常见的说法，避免过度正式或书面化。"
-    ]
+    ],
+    "ms_马来语_DBP规范补充_来源dbp-translator-claude": {
+      "_说明": "github keemanxp/dbp-translator-claude(★25) 提炼。马来西亚官方语言机构 DBP 标准，核心是区分马来语/印尼语、用 DBP 认可的 IT 术语。",
+      "马印易混词_用马来西亚版": {
+        "polis": "印尼polisi(警察)", "boleh": "印尼bisa(能/可以)", "kerana": "印尼karena(因为)",
+        "maklumat": "印尼informasi(信息)", "perisian": "印尼perangkat lunak(软件)", "mesyuarat": "印尼rapat(会议)",
+        "kakitangan": "印尼karyawan(员工)", "hospital": "印尼rumah sakit(医院)", "kerajaan": "印尼pemerintah(政府)",
+        "bahagian": "印尼bagian(部分)", "mengesyorkan": "印尼merekomendasikan(推荐)"
+      },
+      "IT_UI术语_DBP标准": {
+        "muat turun": "下载(非download)", "muat naik": "上传", "kata laluan": "密码(非password)",
+        "perisian": "软件", "tetingkap": "窗口(非window)", "log masuk": "登录",
+        "daftar": "注册", "tetapan": "设置", "pengguna": "用户", "mesej": "消息"
+      },
+      "避坑": [
+        "不要过度保留英文——有好的马来语词就用(muat turun 而非 download)。",
+        "被动句别机械转 di- 结构，能用主动句更自然就用主动。",
+        "习语不直译(Break a leg ≠ patahkan kaki)，找马来语等效表达。"
+      ]
+    }
   },
 
   "通用翻译规则_从laravel-ai-translator提炼": {

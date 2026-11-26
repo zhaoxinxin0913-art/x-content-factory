@@ -39,10 +39,25 @@ module.exports = async function handleBatchMedia(body, OUTPUT, downloadMedia, tr
       
       console.log(`  ⏳ [${idx + 1}/${urls.length}] 开始: ${handle}/${tweetId}`);
       
-      const result = await Promise.race([
-        downloadMedia(url, token, jobDir),
-        new Promise((_, rj) => setTimeout(() => rj(new Error('超时120秒')), 120000))
-      ]);
+      // 带重试：偶发加载慢/超时时自动重试一次（换新浏览器实例）
+      let result;
+      let lastErr;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          result = await Promise.race([
+            downloadMedia(url, token, jobDir),
+            new Promise((_, rj) => setTimeout(() => rj(new Error('超时120秒')), 120000))
+          ]);
+          break; // 成功
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 2) {
+            console.log(`  🔄 [${idx + 1}/${urls.length}] 第${attempt}次失败(${e.message})，2秒后重试...`);
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+      }
+      if (!result) throw lastErr;
       
       // 翻译（添加防御性检查）
       let cnText = result.post.text || '';

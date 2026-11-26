@@ -754,7 +754,7 @@ async function scrapePost(postUrl,token){
   const p=await b.newPage();
   try {
     await p.setViewport({width:1280,height:900});
-    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:30000});
+    await p.goto('https://x.com',{waitUntil:'domcontentloaded',timeout:45000});
     await p.evaluate(t=>{document.cookie=`auth_token=${t}; domain=.x.com; path=/; secure`;},token);
     
     // 验证Cookie是否设置成功
@@ -945,7 +945,12 @@ async function downloadMedia(postUrl,token,jobDir){
       }
       try{fs.unlinkSync(cookieFile)}catch(e){}
     }catch(e){
-      console.error('❌ 视频下载失败:', e.message);
+      // yt-dlp 对无视频帖子会报 "No video" —— 属正常情况，降噪为信息级
+      if(/No video|Unsupported URL|no video could be found/i.test(e.message)){
+        console.log('ℹ️  该帖无可下载视频（跳过）');
+      } else {
+        console.error('⚠️  视频下载失败（不影响图片/文案）:', e.message.split('\n')[0]);
+      }
     }
   } else {
     console.log('ℹ️  未检测到视频');
