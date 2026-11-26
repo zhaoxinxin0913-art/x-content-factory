@@ -880,8 +880,49 @@ async function scrapePost(postUrl,token){
       };
       // 用户信息
       const handle=tweet.querySelector('a[href*="/status/"]')?.closest('article')?.querySelector('a[role="link"][href^="/"]')?.getAttribute('href')?.replace('/','') ||'';
-      return{text,time,aria,imgs,hasVideo,handle,videoDebug};
+      // 附件容器自检信号：页面存在图片/视频容器但提取为空 → 说明懒加载未完成，漏抓
+      const hasPhotoContainer = !!tweet.querySelector('div[data-testid="tweetPhoto"]') || !!tweet.querySelector('a[href*="/photo/"]');
+      return{text,time,aria,imgs,hasVideo,handle,videoDebug,hasPhotoContainer};
     });
+
+    // 🔍 附件自检补抓：页面有图片容器但提取到0张 → 懒加载未完成，重试提取
+    if(post && post.hasPhotoContainer && post.imgs.length===0){
+      console.log('⚠️  检测到图片容器但未抓到图片，触发补抓...');
+      for(let retry=1; retry<=3 && post.imgs.length===0; retry++){
+        // 强制加载所有懒加载图片并等待
+        await p.evaluate(()=>{
+          document.querySelectorAll('div[data-testid="tweetPhoto"] img, img[alt*="Image"]').forEach(img=>{
+            img.scrollIntoView();
+            img.loading='eager';
+          });
+          window.scrollBy(0, 200);
+        });
+        await new Promise(r=>setTimeout(r, 1200));
+        // 重新提取图片
+        const reImgs = await p.evaluate(()=>{
+          const tweet=document.querySelector('article[data-testid="tweet"]');
+          if(!tweet)return [];
+          const set=new Set();
+          ['img[src*="pbs.twimg.com/media"]','img[alt*="Image"]','div[data-testid="tweetPhoto"] img','a[href*="/photo/"] img'].forEach(sel=>{
+            tweet.querySelectorAll(sel).forEach(img=>{
+              if(img.src && img.src.includes('pbs.twimg.com/media')){
+                let src=img.src;
+                src = src.includes('name=') ? src.replace(/name=\w+/,'name=orig') : src+'?name=orig';
+                set.add(src);
+              }
+            });
+          });
+          return [...set];
+        });
+        if(reImgs.length>0){
+          post.imgs = reImgs;
+          console.log(`✅ 补抓成功(第${retry}次)：找回 ${reImgs.length} 张图片`);
+        } else {
+          console.log(`   补抓第${retry}次仍为空...`);
+        }
+      }
+      if(post.imgs.length===0) console.log('⚠️  补抓3次仍无图片，可能是受限内容或已删除');
+    }
 
     // 优化：跳过评论抓取（媒体搬运不需要）
     return{post,comments:[]};
@@ -901,24 +942,43 @@ async function downloadMedia(postUrl,token,jobDir){
     console.log('🔍 视频检测详情:', JSON.stringify(post.videoDebug));
   }
 
-  // 优化：并发下载图片（方案2）
+  // 优化：并发下载图片（方案2）+ 下载校验重试
   const downloadedImgs=[];
   const downloadImage=async(imgUrl,index)=>{
     const ext=imgUrl.includes('format=png')?'png':'jpg';
     const fname=`img_${String(index+1).padStart(2,'0')}.${ext}`;
-    try{
-      const{exec}=require('child_process');
-      await new Promise((resolve,reject)=>{
-        exec(`curl -sL "${imgUrl}" -o "${path.join(mediaDir,fname)}"`,{timeout:30000},(err)=>{
-          if(err)reject(err);else{downloadedImgs.push('media/'+fname);resolve();}
+    const fpath=path.join(mediaDir,fname);
+    const{exec}=require('child_process');
+    // 最多下载2次：防止空文件/网络抖动
+    for(let attempt=1; attempt<=2; attempt++){
+      try{
+        await new Promise((resolve,reject)=>{
+          exec(`curl -sL --max-time 30 "${imgUrl}" -o "${fpath}"`,{timeout:35000},(err)=>{
+            if(err)reject(err);else resolve();
+          });
         });
-      });
-    }catch(e){/* skip */}
+        // 校验：文件存在且非空（>1KB，排除错误页/空响应）
+        if(fs.existsSync(fpath) && fs.statSync(fpath).size > 1024){
+          downloadedImgs.push('media/'+fname);
+          return;
+        }
+        console.log(`   ⚠️ 图${index+1}下载为空(第${attempt}次)，${attempt<2?'重试':'放弃'}...`);
+      }catch(e){
+        console.log(`   ⚠️ 图${index+1}下载失败(第${attempt}次): ${e.message.split('\n')[0]}`);
+      }
+      if(attempt<2) await new Promise(r=>setTimeout(r,800));
+    }
   };
   // 最多5个并发
   const concurrency=5;
   for(let i=0;i<post.imgs.length;i+=concurrency){
     await Promise.all(post.imgs.slice(i,i+concurrency).map((url,idx)=>downloadImage(url,i+idx)));
+  }
+  // 下载完成校验：抓到链接数 vs 实际落盘数
+  if(post.imgs.length>0 && downloadedImgs.length<post.imgs.length){
+    console.log(`⚠️  图片下载不完整: ${downloadedImgs.length}/${post.imgs.length} 成功`);
+  } else if(post.imgs.length>0){
+    console.log(`✅ 图片全部下载: ${downloadedImgs.length}/${post.imgs.length}`);
   }
 
   // 下载视频（用 yt-dlp）
