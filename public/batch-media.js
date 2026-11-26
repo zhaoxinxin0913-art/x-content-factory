@@ -38,7 +38,7 @@ async function runBatchMedia() {
   
   const urls = urlsText.split('\n').map(u => u.trim()).filter(u => u);
   if (urls.length === 0) return alert('请至少输入一个链接');
-  if (urls.length > 20) return alert('单次最多处理20条');
+  if (urls.length > 40) return alert('单次最多处理40条');
   
   MB.disabled = true;
   MB.textContent = '⏳ 批量处理中 (' + urls.length + '条)...';
@@ -54,33 +54,50 @@ async function runBatchMedia() {
     ML.scrollTop = ML.scrollHeight;
   }
   
-  MA('📦 开始批量处理 ' + urls.length + ' 个帖子...', 'info');
-  
+  // 自动分批：每批8条，避免单次请求过长导致 failed to fetch
+  const BATCH_SIZE = 8;
+  const totalBatches = Math.ceil(urls.length / BATCH_SIZE);
+  MA('📦 共 ' + urls.length + ' 条，自动分 ' + totalBatches + ' 波处理（每波' + BATCH_SIZE + '条）...', 'info');
+
+  // 累积合并各波结果
+  const d = { total: urls.length, succeeded: 0, failed: 0, results: [], errors: [] };
+
   try {
-    const r = await fetch('/api/batch-media', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({urls: urls, token: t})
-    });
-    
-    let d;
-    try {
-      d = await r.json();
-    } catch(e) {
-      MA('服务器返回异常', 'err');
-      MB.disabled = false;
-      MB.textContent = '🎬 开始搬运';
-      return;
+    for (let bi = 0; bi < totalBatches; bi++) {
+      const chunk = urls.slice(bi * BATCH_SIZE, (bi + 1) * BATCH_SIZE);
+      MA('🚀 第 ' + (bi + 1) + '/' + totalBatches + ' 波开始（' + chunk.length + '条）...', 'info');
+      MB.textContent = '⏳ 处理中 (第' + (bi + 1) + '/' + totalBatches + '波)...';
+
+      let bd;
+      try {
+        const r = await fetch('/api/batch-media', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({urls: chunk, token: t})
+        });
+        bd = await r.json();
+      } catch(e) {
+        // 单波网络失败：标记该波全部为失败，继续下一波，不中断整体
+        MA('⚠️ 第 ' + (bi + 1) + ' 波网络异常: ' + e.message + '，该波跳过', 'err');
+        chunk.forEach(function(u){ d.failed++; d.errors.push({url: u, error: '网络异常: ' + e.message}); });
+        continue;
+      }
+
+      if (bd.error) {
+        MA('⚠️ 第 ' + (bi + 1) + ' 波返回错误: ' + bd.error, 'err');
+        chunk.forEach(function(u){ d.failed++; d.errors.push({url: u, error: bd.error}); });
+        continue;
+      }
+
+      // 合并本波结果
+      d.succeeded += bd.succeeded || 0;
+      d.failed += bd.failed || 0;
+      if (bd.results) d.results = d.results.concat(bd.results);
+      if (bd.errors) d.errors = d.errors.concat(bd.errors);
+      MA('✅ 第 ' + (bi + 1) + '/' + totalBatches + ' 波完成: ' + (bd.succeeded||0) + ' 成功, ' + (bd.failed||0) + ' 失败', 'ok');
     }
-    
-    if (d.error) {
-      MA(d.error, 'err');
-      MB.disabled = false;
-      MB.textContent = '🎬 开始搬运';
-      return;
-    }
-    
-    MA('✅ 批量处理完成: ' + d.succeeded + ' 成功, ' + d.failed + ' 失败', 'ok');
+
+    MA('🎉 全部完成: ' + d.succeeded + ' 成功, ' + d.failed + ' 失败', 'ok');
     
     // 渲染结果
     let html = '<h3>✅ 批量搬运完成</h3>';

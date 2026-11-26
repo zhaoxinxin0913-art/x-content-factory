@@ -387,7 +387,7 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
   <p class="dsc" data-i18n="mediaDesc">输入单条或多条帖子链接，提取文案、图片/视频、优质评论</p>
   <div style="display:flex;gap:8px;margin-bottom:10px">
     <button class="btn" style="width:auto;padding:8px 16px;background:#000;color:#fff;font-size:12px" onclick="switchMediaMode('single')" id="modeSingle">单条</button>
-    <button class="btn" style="width:auto;padding:8px 16px;background:#fff;color:#000;border:1.5px solid #000;font-size:12px" onclick="switchMediaMode('batch')" id="modeBatch">批量 (最多20条)</button>
+    <button class="btn" style="width:auto;padding:8px 16px;background:#fff;color:#000;border:1.5px solid #000;font-size:12px" onclick="switchMediaMode('batch')" id="modeBatch">批量 (最多40条·自动分波)</button>
   </div>
   <div id="single-mode">
     <input class="inp" id="murl" data-ph="phMediaUrl" placeholder="https://x.com/用户名/status/帖子ID">
