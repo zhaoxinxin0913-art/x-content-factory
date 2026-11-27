@@ -61,5 +61,8 @@ test('NO_FALLBACK: partial skip below threshold does NOT abort', async () => {
   });
   loadCore(sb);
   await sb.processTranslationPipeline('t', 0, ['ja']);
-  assert.equal(DB.tasks[0].status, 'completed', '少量跳过不熔断，正常完成');
+  // 少量跳过不熔断(不 abort)；但有 2 条 no-engine-skip 残留，按新逻辑标 completed_with_gaps 并记录缺口，
+  // 避免把"模型跳过"误报成验收完成。关键是没被中断，且缺口被如实记录。
+  assert.equal(DB.tasks[0].status, 'completed_with_gaps', '少量跳过不熔断，但如实标记缺口');
+  assert.equal(DB.tasks[0].gaps.retranslate, 2, '2条跳过计入待补翻缺口');
 });

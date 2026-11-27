@@ -913,6 +913,7 @@ app.post('/api/translate', async (req, res) => {
   task.columnIndex = columnIndex;
   task.refColumns = Array.isArray(refColumns) ? refColumns.filter(i => i !== columnIndex) : []; // 参考列（排除原文列自身）
   task.refTypes = (refTypes && typeof refTypes === 'object') ? refTypes : {}; // {列索引: 'lang'|'scene'} 用户手选类型
+  task.configSnapshot = buildConfigSnapshot();   // 冻结本批所用配置版本(模型/术语/DNT/知识库)，供审计与区分批次版本
   saveDB();
 
   // 异步处理翻译流水线
@@ -1140,7 +1141,7 @@ app.get('/api/export-classified/:taskId', (req, res) => {
   if (!task) return res.status(404).json({ error: '任务不存在' });
   const kind = req.query.kind;
   if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) return res.status(400).json({ error: '无效导出类型' });
-  if (task.status !== 'completed') return res.status(409).json({ error: '请等待翻译完成后再导出' });
+  if (task.status !== 'completed' && task.status !== 'completed_with_gaps') return res.status(409).json({ error: '请等待翻译完成后再导出' });
   try {
     const results = DB.results.filter(r => r.taskId === task.id);
     const reviews = DB.reviews.filter(r => r.taskId === task.id);
@@ -1734,11 +1735,12 @@ function extractContentLinks(text) {
 
 // 组装单条结果（主流程与补翻共用，保证分档/复核原因逻辑完全一致）
 function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gloss) {
+  const rowUid = stableRowUid(taskId, rowIndex, sourceText);   // 稳定行标识(抗排序/重跑)，供跨批对账
   // 纯链接/资源路径由程序原样回填，未调用模型，不需要翻译复核。
   if (isPureMediaLink(sourceText)) {
     return {
       id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      taskId, rowIndex, sourceText, targetLang: lang,
+      taskId, rowIndex, rowUid, sourceText, targetLang: lang,
       translation: sourceText, translationA: sourceText, translationB: sourceText,
       chosen: 'A', consistency: 10, divergence: '',
       validationScore: 10, confidence: 100,
@@ -1756,7 +1758,7 @@ function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gl
   const progFail = !prog.pass;
   return {
     id: `result_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    taskId, rowIndex, sourceText, targetLang: lang,
+    taskId, rowIndex, rowUid, sourceText, targetLang: lang,
     translation: cRes.final, translationA: aRes.translation, translationB: bRes.translation,
     chosen: cRes.chosen, consistency: cRes.consistency, divergence: cRes.divergence,
     validationScore: cRes.consistency,
@@ -1766,6 +1768,37 @@ function assembleResult(taskId, rowIndex, sourceText, lang, aRes, bRes, cRes, gl
     reviewSeverity: (route === 'human' ? 'high' : route === 'spot_check' ? 'medium' : 'low'),
     modelA: aRes.model, modelB: bRes.model, modelC: cRes.model,
     cDetail: cRes.detail || null, createdAt: new Date().toISOString()
+  };
+}
+// 稳定行标识：taskId + rowIndex + 源文短哈希。rowIndex 会随表排序/重跑漂移，
+// 带上源文哈希可在跨批对账时识别"这到底是不是同一行原文"，不改动现有 rowIndex 索引逻辑。
+// 用无依赖的 FNV-1a 字符串哈希(不引 crypto，兼容 vm 沙箱测试环境)。
+function cheapHash(s) {
+  let h = 0x811c9dc5;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+function stableRowUid(taskId, rowIndex, sourceText) {
+  return `${taskId}:${rowIndex}:${cheapHash(sourceText)}`;
+}
+// 配置版本快照：翻译启动时冻结本批所用的模型名/术语/DNT/知识库版本，生成指纹。
+// 用途：审计"这批是用哪版配置跑的"，跨批次对账时区分配置版本(运行中改术语不影响已记录的快照)。
+// 只记名称/数量/版本/哈希，不含 API Key。
+function buildConfigSnapshot() {
+  const models = {};
+  ['A', 'B', 'C'].forEach(k => { const m = SETTINGS.models[k] || {}; models[k] = { protocol: m.protocol || '', model: m.model || '' }; });
+  const gloss = DB.glossary || {}, gml = DB.glossaryML || [], dnt = DB.dnt || [];
+  const kb = PRODUCT_KNOWLEDGE_BASE || {};
+  return {
+    at: new Date().toISOString(),
+    models,
+    glossaryCount: Object.keys(gloss).length,
+    glossaryMLCount: gml.length,
+    dntCount: Array.isArray(dnt) ? dnt.length : 0,
+    kbVersion: kb.version || 'unknown',
+    // 指纹：术语+DNT 内容哈希，改一个词指纹就变，便于判断两批是否同配置
+    termsFingerprint: cheapHash(JSON.stringify(gloss) + JSON.stringify(gml) + JSON.stringify(dnt))
   };
 }
 // 判定一条结果是否需要补翻：任一模型未调通(原样返回/免费兜底/规则兜底/error/跳过)
@@ -1828,9 +1861,14 @@ async function retranslateFailed(taskId) {
       }
     }
   }
-  // 补翻结束：任务已全部翻译完（含替换/补齐），置回 completed，避免卡在 translating 无法导出。
-  task.status = 'completed';
-  saveDB();
+  // 补翻结束：按缺口判定最终状态(与主流程一致)。仍有缺译/失败残留 → completed_with_gaps，
+  // 避免把"还没补齐"误标 completed；全部补齐才 completed，解锁导出。
+  if (!summary.aborted) {
+    const gaps = computeTaskGaps(taskId, task.columnIndex, task.targetLangs);
+    task.status = gaps.total > 0 ? 'completed_with_gaps' : 'completed';
+    task.gaps = gaps;
+    saveDB();
+  }
   return summary;
   } finally {
     retranslateInFlight.delete(taskId);
@@ -1914,9 +1952,36 @@ async function processTranslationPipeline(taskId, columnIndex, targetLangs) {
     saveDB();
   }
 
-  task.status = 'completed';
+  // 完成判定：不无条件标 completed。扫描是否有缺译行(原文非空但无结果)或补翻残留(no-engine-skip/兜底)，
+  // 有缺口则标 completed_with_gaps 并记录缺口数，避免把"跳过长文本/模型失败"误报成"验收完成"。
+  const gaps = computeTaskGaps(taskId, columnIndex, targetLangs);
+  task.status = gaps.total > 0 ? 'completed_with_gaps' : 'completed';
+  task.gaps = gaps;                    // { total, missing, retranslate, byLang }
   saveDB();
-  console.log(`[Pipeline] Task ${taskId} completed`);
+  console.log(`[Pipeline] Task ${taskId} ${task.status}` + (gaps.total ? ` (缺口 ${gaps.total}: 缺译${gaps.missing}/待补翻${gaps.retranslate})` : ''));
+}
+
+// 统计任务缺口：遍历每个(原文非空行 × 目标语)，看是否缺结果或结果需补翻。供完成判定与前端区分用。
+function computeTaskGaps(taskId, columnIndex, targetLangs) {
+  const task = DB.tasks.find(t => t.id === taskId);
+  if (!task) return { total: 0, missing: 0, retranslate: 0, byLang: {} };
+  const rowIdxs = [];
+  for (let i = 0; i < task.data.length; i++) {
+    const raw = task.data[i][columnIndex];
+    if (raw !== undefined && raw !== null && String(raw).trim() !== '') rowIdxs.push(i);
+  }
+  let missing = 0, retranslate = 0; const byLang = {};
+  for (const lang of (targetLangs || [])) {
+    let m = 0, r = 0;
+    for (const i of rowIdxs) {
+      const res = DB.results.find(x => x.taskId === taskId && x.rowIndex === i && x.targetLang === lang);
+      if (!res) m++;
+      else if (needsRetranslate(res)) r++;
+    }
+    if (m || r) byLang[lang] = { missing: m, retranslate: r };
+    missing += m; retranslate += r;
+  }
+  return { total: missing + retranslate, missing, retranslate, byLang };
 }
 
 // ============================================================
@@ -1953,7 +2018,33 @@ if (require.main === module) app.listen(PORT, () => {
     console.log('💡 提示：当前兜底模式。在网站右上角「模型设置」为 A/B/C 各填地址+Key+模型名即可切换大模型。');
     console.log('');
   }
+  resumeUnfinishedTasks();   // 断点续传：重启后自动把未完成任务接着跑完
 });
+
+// 断点续传：重启后扫描未完成任务并自动续跑。
+// 复用幂等的 retranslateFailed(只补缺失/失败的行×语种，已翻好的不动)，所以"从断点继续"天然成立。
+// - translating：进程中断残留(内存任务已丢)，视为需续跑
+// - completed_with_gaps：翻完但有缺译/模型失败，续跑补齐
+// - aborted：曾因模型连续失败中断，续跑重试(模型/额度恢复后)
+// 设 AUTO_RESUME=0 可关闭(如只想手动补翻)。串行续跑，避免多任务并发打爆代理。
+async function resumeUnfinishedTasks() {
+  if (/^(0|false|no)$/i.test(process.env.AUTO_RESUME || '')) { console.log('[Resume] 已禁用(AUTO_RESUME=0)'); return; }
+  if (!['A', 'B', 'C'].some(k => modelConfigured(SETTINGS.models[k]))) { console.log('[Resume] 未配置模型，跳过自动续跑'); return; }
+  const RESUMABLE = new Set(['translating', 'completed_with_gaps', 'aborted']);
+  const pending = DB.tasks.filter(t => RESUMABLE.has(t.status) && t.columnIndex != null && Array.isArray(t.targetLangs) && t.targetLangs.length);
+  if (!pending.length) { console.log('[Resume] 无未完成任务'); return; }
+  console.log(`[Resume] 发现 ${pending.length} 个未完成任务，10秒后自动续跑(补缺口)：${pending.map(t => t.id).join(', ')}`);
+  await new Promise(r => setTimeout(r, 10000));   // 留出窗口让用户确认模型配置/必要时手动停
+  for (const task of pending) {
+    // 续跑前先算缺口，无缺口直接标完成，不空跑
+    const gaps = computeTaskGaps(task.id, task.columnIndex, task.targetLangs);
+    if (gaps.total === 0) { task.status = 'completed'; task.gaps = gaps; saveDB(); console.log(`[Resume] ${task.id} 无缺口，标 completed`); continue; }
+    console.log(`[Resume] 续跑 ${task.id}（缺口 ${gaps.total}：缺译${gaps.missing}/待补翻${gaps.retranslate}）`);
+    try { const s = await retranslateFailed(task.id); console.log(`[Resume] ${task.id} 完成`, JSON.stringify(s)); }
+    catch (e) { console.error(`[Resume] ${task.id} 续跑失败: ${e.message}`); }
+  }
+  console.log('[Resume] 全部未完成任务已处理');
+}
 
 
 
