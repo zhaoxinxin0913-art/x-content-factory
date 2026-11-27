@@ -168,6 +168,12 @@ async function batchSendToFeishu() {
   
   const btn = document.getElementById('batchFeishuBtn');
   if (!btn) return;
+
+  // 读取用户自定义的飞书目标表格（留空则后端用默认）
+  const feishuTarget = window.feishuTarget || {};
+  if (feishuTarget.baseId && feishuTarget.tableId) {
+    console.log('📤 发送到自定义表格:', feishuTarget);
+  }
   
   btn.disabled = true;
   btn.textContent = '⏳ 正在发送 (0/' + window.batchResults.length + ')...';
@@ -207,7 +213,9 @@ async function batchSendToFeishu() {
             mediaType: item.mediaType || (item.video ? '视频' : '图片'),
             imagePaths: item.imagePaths || [],  // 传递相对路径数组
             videoPath: item.videoPath || '',     // 传递视频相对路径
-            outputDir: item.outputDir            // 传递输出目录
+            outputDir: item.outputDir,           // 传递输出目录
+            baseId: feishuTarget.baseId || '',   // 自定义多维表格（留空用默认）
+            tableId: feishuTarget.tableId || ''  // 自定义子表（留空用默认）
           })
         });
         
@@ -253,8 +261,78 @@ async function batchSendToFeishu() {
   }, 2000);
 }
 
+// 加载飞书多维表格的子表列表
+async function loadFeishuTables() {
+  const urlInput = document.getElementById('feishuUrl');
+  const sel = document.getElementById('feishuTableSelect');
+  const status = document.getElementById('feishuTableStatus');
+  const url = urlInput.value.trim();
+
+  if (!url) {
+    status.textContent = '⚠️ 请先粘贴飞书多维表格链接';
+    status.style.color = '#d32f2f';
+    return;
+  }
+
+  status.textContent = '⏳ 正在加载子表...';
+  status.style.color = '#666';
+  sel.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/feishu-tables', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ url })
+    });
+    const d = await res.json();
+
+    if (d.error) {
+      status.textContent = '❌ ' + d.error;
+      status.style.color = '#d32f2f';
+      window.feishuTarget = {};
+      return;
+    }
+
+    if (!d.tables || d.tables.length === 0) {
+      status.textContent = '⚠️ 该表格下没有找到子表';
+      status.style.color = '#d32f2f';
+      return;
+    }
+
+    // 填充下拉
+    sel.innerHTML = '';
+    d.tables.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.table_id;
+      opt.textContent = t.name;
+      // 链接里带的 table 优先选中
+      if (d.defaultTableId && t.table_id === d.defaultTableId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.style.display = 'block';
+
+    // 记录目标 + 选中事件
+    const applyTarget = () => {
+      window.feishuTarget = { baseId: d.baseId, tableId: sel.value };
+      const name = sel.options[sel.selectedIndex].textContent;
+      status.textContent = '✅ 将发送到子表：' + name;
+      status.style.color = '#00ba7c';
+    };
+    sel.onchange = applyTarget;
+    applyTarget();
+
+    status.textContent = '✅ 已加载 ' + d.tables.length + ' 个子表，请选择目标（当前：' + sel.options[sel.selectedIndex].textContent + '）';
+    status.style.color = '#00ba7c';
+  } catch (e) {
+    status.textContent = '❌ 加载失败: ' + e.message;
+    status.style.color = '#d32f2f';
+    window.feishuTarget = {};
+  }
+}
+
 // 导出到全局
 window.switchMediaMode = switchMediaMode;
 window.runBatchMedia = runBatchMedia;
 window.batchSendToFeishu = batchSendToFeishu;
+window.loadFeishuTables = loadFeishuTables;
 window.currentMediaMode = function() { return currentMediaMode; };

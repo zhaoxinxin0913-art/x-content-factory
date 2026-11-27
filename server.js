@@ -10,7 +10,7 @@ if(fs.existsSync(path.join(__dirname,'.env'))){
 }
 const PORT=5050,OUTPUT=path.join(__dirname,'output');
 fs.existsSync(OUTPUT)||fs.mkdirSync(OUTPUT);
-const{uploadToFeishu}=require('./feishu.js');
+const{uploadToFeishu,listTables,parseFeishuUrl}=require('./feishu.js');
 const{searchImagesForPosts}=require('./image-search.js');
 const handleBatchMedia=require('./batch-media-handler.js');
 
@@ -402,6 +402,18 @@ details div{background:#f9f9f9;padding:10px;border-radius:6px;margin-top:6px;fon
     <button class="btn" style="width:auto;padding:12px 14px;background:#1d9bf0;color:#fff;font-size:13px;white-space:nowrap" onclick="window.open('https://x.com','_blank');alert('登录后按 F12 → Application → Cookies → x.com → 找到 auth_token → 双击复制')">🔐 获取Token</button>
     <button class="btn" style="width:auto;padding:12px 14px;background:#333;color:#fff;font-size:13px;white-space:nowrap" onclick="pasteToken('mtoken',this)">📋 粘贴</button>
   </div>
+  <details style="margin:10px 0;border:1px solid #eee;border-radius:8px;padding:10px 12px">
+    <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#333">🗂️ 飞书表格设置（可选，默认传到原表格）</summary>
+    <div style="margin-top:10px">
+      <p style="font-size:11px;color:#999;margin-bottom:6px">粘贴飞书多维表格链接，点「加载子表」后选择要传入的数据表。留空则使用默认表格。</p>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input class="inp" id="feishuUrl" placeholder="https://xxx.feishu.cn/base/xxxxx?table=xxxxx" style="flex:1;margin-bottom:0">
+        <button class="btn" style="width:auto;padding:12px 14px;background:#00ba7c;color:#fff;font-size:13px;white-space:nowrap" onclick="loadFeishuTables()">📋 加载子表</button>
+      </div>
+      <select id="feishuTableSelect" style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:13px;display:none"></select>
+      <p id="feishuTableStatus" style="font-size:11px;color:#666;margin-top:6px"></p>
+    </div>
+  </details>
   <button class="btn btn-go" id="mBtn" onclick="runMedia()" data-i18n="btnMedia">🎬 开始搬运</button>
 </div>
 <div class="result" id="mresult"></div><div class="log" id="mlog"></div></div>
@@ -1263,6 +1275,28 @@ const server=http.createServer(async(req,res)=>{
       }
     });return;
   }
+  // 🗂️ 列出飞书多维表格的子表 API（传 base 链接或 token）
+  if(u.pathname==='/api/feishu-tables'&&req.method==='POST'){
+    let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
+      try{
+        const{url,baseId:rawBaseId}=JSON.parse(body);
+        // 优先解析链接，其次直接用传入的 baseId
+        const parsed=parseFeishuUrl(url||'');
+        const baseId=parsed.baseId||rawBaseId;
+        if(!baseId){
+          res.writeHead(400,{'Content-Type':'application/json'});
+          res.end(JSON.stringify({error:'无法从链接解析出多维表格ID，请确认链接含 /base/xxx'}));
+          return;
+        }
+        const tables=await listTables(baseId);
+        res.writeHead(200,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({success:true,baseId,defaultTableId:parsed.tableId||'',tables}));
+      }catch(e){
+        res.writeHead(400,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({error:e.message}));
+      }
+    });return;
+  }
   // 批量发送到飞书 API  
   if(u.pathname==='/api/send-to-feishu-batch'&&req.method==='POST'){
     let body='';req.on('data',c=>body+=c);req.on('end',async()=>{
@@ -1301,13 +1335,15 @@ const server=http.createServer(async(req,res)=>{
         
         console.log(`📤 批量发送: ${fileList.length} 个附件`);
         
-        // 上传到飞书
+        // 上传到飞书（支持自定义目标表格）
         const feishuResult=await uploadToFeishu({
           content: data.content,
           tags: data.tags,
           images: data.images,
           mediaType: data.mediaType,
-          files: fileList
+          files: fileList,
+          baseId: data.baseId,
+          tableId: data.tableId
         });
         
         if(feishuResult.success){

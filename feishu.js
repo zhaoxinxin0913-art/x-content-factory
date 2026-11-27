@@ -47,7 +47,8 @@ function getTenantToken() {
 }
 
 // 上传文件到飞书（图片或视频）
-function uploadFile(token, filePath) {
+function uploadFile(token, filePath, baseId) {
+  const parentNode = baseId || BASE_ID;
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(filePath)) {
       return reject(new Error(`文件不存在: ${filePath}`));
@@ -76,7 +77,7 @@ function uploadFile(token, filePath) {
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="parent_type"\r\n\r\n${parentType}\r\n`;  // 动态选择：视频用bitable_file，图片用bitable_image
     body += `--${boundary}\r\n`;
-    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${BASE_ID}\r\n`;  // 多维表格token
+    body += `Content-Disposition: form-data; name="parent_node"\r\n\r\n${parentNode}\r\n`;  // 多维表格token（支持动态）
     body += `--${boundary}\r\n`;
     body += `Content-Disposition: form-data; name="size"\r\n\r\n${fileSize}\r\n`;
     body += `--${boundary}--\r\n`;
@@ -125,7 +126,9 @@ function uploadFile(token, filePath) {
 }
 
 // 添加记录到多维表格
-async function addRecord(token, data) {
+async function addRecord(token, data, baseId, tableId) {
+  const useBase = baseId || BASE_ID;
+  const useTable = tableId || TABLE_ID;
   const fileTokens = [];
   
   // 上传附件（使用正确的素材上传API）
@@ -133,7 +136,7 @@ async function addRecord(token, data) {
     console.log(`📎 上传 ${data.files.length} 个附件...`);
     for (const file of data.files) {
       try {
-        const token_file = await uploadFile(token, file);
+        const token_file = await uploadFile(token, file, useBase);
         fileTokens.push({ file_token: token_file });
         console.log(`✅ 已上传: ${path.basename(file)}`);
       } catch (e) {
@@ -189,7 +192,7 @@ async function addRecord(token, data) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'open.feishu.cn',
-      path: `/open-apis/bitable/v1/apps/${BASE_ID}/tables/${TABLE_ID}/records`,
+      path: `/open-apis/bitable/v1/apps/${useBase}/tables/${useTable}/records`,
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -262,8 +265,12 @@ async function uploadToFeishu(postData) {
       data.files.push(postData.videoPath);
     }
     
-    console.log(`📤 上传到飞书多维表格（${data.files.length} 个附件）...`);
-    const record = await addRecord(token, data);
+    // 目标表格（支持用户自定义，留空用默认）
+    const targetBase = postData.baseId || BASE_ID;
+    const targetTable = postData.tableId || TABLE_ID;
+    const isCustom = (postData.baseId && postData.baseId !== BASE_ID) || (postData.tableId && postData.tableId !== TABLE_ID);
+    console.log(`📤 上传到飞书多维表格（${data.files.length} 个附件）${isCustom ? ' → 自定义表格 '+targetBase+'/'+targetTable : ''}...`);
+    const record = await addRecord(token, data, targetBase, targetTable);
     
     console.log('✅ 成功上传到飞书！记录ID:', record.record_id);
     return { success: true, record_id: record.record_id };
@@ -273,4 +280,53 @@ async function uploadToFeishu(postData) {
   }
 }
 
-module.exports = { uploadToFeishu };
+// 解析飞书多维表格链接，提取 base token 和 table id
+// 支持形如：https://xxx.feishu.cn/base/BASETOKEN?table=TABLEID&view=VIEWID
+//          https://xxx.feishu.cn/wiki/WIKITOKEN?table=TABLEID （wiki节点需额外解析，暂取token）
+function parseFeishuUrl(url) {
+  if (!url) return {};
+  const result = {};
+  // base token: /base/xxx 或 /wiki/xxx
+  const baseMatch = url.match(/\/(?:base|wiki)\/([A-Za-z0-9]+)/);
+  if (baseMatch) result.baseId = baseMatch[1];
+  // table id: ?table=xxx 或 &table=xxx
+  const tableMatch = url.match(/[?&]table=([A-Za-z0-9]+)/);
+  if (tableMatch) result.tableId = tableMatch[1];
+  return result;
+}
+
+// 列出某个多维表格 base 下的所有数据表（子表）
+function listTables(baseId) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const token = await getTenantToken();
+      const options = {
+        hostname: 'open.feishu.cn',
+        path: `/open-apis/bitable/v1/apps/${baseId}/tables?page_size=100`,
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+        timeout: 15000
+      };
+      const req = https.request(options, (res) => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => {
+          try {
+            const r = JSON.parse(body);
+            if (r.code === 0) {
+              const tables = (r.data.items || []).map(t => ({ table_id: t.table_id, name: t.name }));
+              resolve(tables);
+            } else {
+              reject(new Error(`列出子表失败: ${r.msg} (code ${r.code})`));
+            }
+          } catch (e) { reject(e); }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => reject(new Error('列出子表超时')));
+      req.end();
+    } catch (e) { reject(e); }
+  });
+}
+
+module.exports = { uploadToFeishu, listTables, parseFeishuUrl };
