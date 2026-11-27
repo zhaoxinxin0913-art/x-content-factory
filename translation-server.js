@@ -1394,6 +1394,23 @@ function matchSourceTerms(text, terms, caseSensitive = false) {
   return selected.sort((a, b) => a.start - b.start);
 }
 
+// 按一批源文裁剪术语表/DNT：只保留本批源文里实际出现的条目(用 matchSourceTerms 的词边界匹配)。
+// 相关术语一条不漏(并集)，只去掉本批用不到的，既省 token 又让相关术语更突出，不损命中率。
+// 大批量短文案场景收益显著(一批十几条短UI文案通常只涉及少数术语)。定义在 matchSourceTerms 旁，
+// 确保两者同在流水线核心区(沙箱测试截取区)内。
+function scopeGlossaryToSources(glossary, sourceTexts) {
+  if (!glossary || !glossary.map) return glossary;
+  const keys = Object.keys(glossary.map);
+  const dnt = glossary.dntList || [];
+  if (!keys.length && !dnt.length) return glossary;
+  const joined = sourceTexts.map(s => String(s || '')).join('\n');
+  const hitTerms = new Set(matchSourceTerms(joined, keys).map(m => m.term));
+  const hitDnt = new Set(matchSourceTerms(joined, dnt).map(m => m.term));
+  const map = {};
+  for (const k of keys) if (hitTerms.has(k)) map[k] = glossary.map[k];
+  return { map, dntList: dnt.filter(d => hitDnt.has(d)) };
+}
+
 function programChecks(sourceText, finalText, glossary = {}, dntList = []) {
   const src = String(sourceText || ''), out = String(finalText || '');
   // A skipped resource is immutable, including whitespace, query and fragment.
@@ -1644,13 +1661,15 @@ async function generateDraftWindow(task, rowIdxs, columnIndex, lang) {
   }
   const run = step => {
     const cfg = models[step];
+    // 按本批源文裁剪术语表注入 sharedPrompt：相关术语全保留，去掉本批用不到的，省 token 且更突出。
+    const batchGloss = scopeGlossaryToSources(gloss, realJobs.map(j => j.sourceText));
     const sharedPrompt = fillLocaleAwarePrompt(cfg.prompt, {
       targetLang:langName(lang), sourceText:'__ITEM_SOURCE_TEXT__',
-      glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:'__ITEM_REFS__'
+      glossary:glossaryToPrompt(batchGloss, '请严格遵守'), refs:'__ITEM_REFS__'
     }, lang);
     const items = realJobs.map(job => ({...job, sharedPrompt, prompt:fillLocaleAwarePrompt(cfg.prompt, {
       targetLang:langName(lang), sourceText:job.sourceText,
-      glossary:glossaryToPrompt(gloss, '请严格遵守'), refs:job.refs || ''
+      glossary:glossaryToPrompt(batchGloss, '请严格遵守'), refs:job.refs || ''
     }, lang)}));
     return generateDrafts({step,items,cfg,cache:draftCache,stats:task.abDraftStats,configured:modelConfigured(cfg),call:callLLM,
       single: (job, frozenCfg) => (step === 'A' ? modelA_generate : modelB_generate)(job.sourceText,lang,gloss,job.refs,frozenCfg)});
@@ -1678,7 +1697,9 @@ async function arbitrateWindow(jobs, lang) {
     return m;
   }
   const gloss = jobs[0] ? jobs[0].gloss : { map:{}, dntList:[] };
-  const glossaryText = glossaryToPrompt(gloss, '请严格核对');
+  // 按本批源文裁剪术语表注入 sharedPrompt(相关术语全保留)；单条 fallback 仍用全量 j.gloss，保险。
+  const batchGloss = scopeGlossaryToSources(gloss, jobs.map(j => j.sourceText));
+  const glossaryText = glossaryToPrompt(batchGloss, '请严格核对');
   const sharedPrompt = fillLocaleAwarePrompt(cfg.prompt, {
     sourceText:'__ITEM_SOURCE_TEXT__', transA:'__ITEM_A__', transB:'__ITEM_B__',
     targetLang: langName(lang), glossary: glossaryText, refs:'__ITEM_REFS__'
@@ -1993,7 +2014,7 @@ if (require.main !== module) {
   module.exports = {
     programChecks, jsonStructCheck, jsonSkeleton, tryParseJson, detectHighRisk, isPureMediaLink,
     canonicalLang, langName, localeRulesToPrompt, productKnowledgeToPrompt, termTranslationForLang,
-    matchSourceTerms, buildRefs, buildAiReviewPrompt, buildGlossary, runAiReview,
+    matchSourceTerms, buildRefs, buildAiReviewPrompt, buildGlossary, runAiReview, scopeGlossaryToSources, glossaryToPrompt,
     app, extractContentLinks, classifyRoute, assembleResult, abortIfMassSkip
   };
 }
