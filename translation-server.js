@@ -1851,11 +1851,17 @@ async function retranslateFailed(taskId) {
   // 跳过它们，保留现状进人工复审，让补翻快速处理大量正常短条目。
   const MAX_SRC = parseInt(process.env.RETRANSLATE_MAX_SRC || '800', 10);
   const summary = { retranslated: 0, skippedLong: 0, byLang: {} };
+  // 预建 (rowIndex|lang)→result 索引，避免行选择/删旧时 .find()/.findIndex() 全表扫描
+  // (1.2万行×3语种会产生数亿次比较而卡死)。补翻过程中增删结果时同步维护此索引。
+  const resIndex = new Map();
+  for (const r of DB.results) {
+    if (r.taskId === taskId) resIndex.set(r.rowIndex + '|' + r.targetLang, r);
+  }
   for (const lang of langs) {
     // 需补：缺失 或 现有结果 needsRetranslate
     const rows = valid.filter(i => {
       if (String(task.data[i][col]).length > MAX_SRC && !isPureMediaLink(task.data[i][col])) { summary.skippedLong++; return false; }
-      const cur = DB.results.find(r => r.taskId === taskId && r.rowIndex === i && r.targetLang === lang);
+      const cur = resIndex.get(i + '|' + lang);
       return !cur || needsRetranslate(cur);
     });
     if (!rows.length) continue;
@@ -1866,10 +1872,11 @@ async function retranslateFailed(taskId) {
       for (const job of jobs) {
         const cRes = verdicts.get(job.id);
         const res = assembleResult(taskId, job.rowIndex, job.sourceText, lang, job.aRes, job.bRes, cRes, job.gloss);
-        // 替换：先删旧的同 (行,语种)，再插新的 → 不产生重复
-        const idx = DB.results.findIndex(r => r.taskId === taskId && r.rowIndex === job.rowIndex && r.targetLang === lang);
-        if (idx >= 0) DB.results.splice(idx, 1);
-        DB.results.push(res); summary.retranslated++;
+        // 替换：先删旧的同 (行,语种)，再插新的 → 不产生重复。用索引定位，避免全表 findIndex。
+        const key = job.rowIndex + '|' + lang;
+        const old = resIndex.get(key);
+        if (old) { const oi = DB.results.indexOf(old); if (oi >= 0) DB.results.splice(oi, 1); }
+        DB.results.push(res); resIndex.set(key, res); summary.retranslated++;
       }
       saveDB();
       console.log(`[Retry] ${lang} 补翻 ${Math.min(start + 100, rows.length)}/${rows.length}`);
@@ -1991,11 +1998,17 @@ function computeTaskGaps(taskId, columnIndex, targetLangs) {
     const raw = task.data[i][columnIndex];
     if (raw !== undefined && raw !== null && String(raw).trim() !== '') rowIdxs.push(i);
   }
+  // 预建 (rowIndex|lang)→result 索引，一次遍历 DB.results 即可，避免双层循环里 .find() 全表扫描
+  // (大任务如 1.2万行×3语种 会产生数亿次比较而卡死)。
+  const idx = new Map();
+  for (const x of DB.results) {
+    if (x.taskId === taskId) idx.set(x.rowIndex + '|' + x.targetLang, x);
+  }
   let missing = 0, retranslate = 0; const byLang = {};
   for (const lang of (targetLangs || [])) {
     let m = 0, r = 0;
     for (const i of rowIdxs) {
-      const res = DB.results.find(x => x.taskId === taskId && x.rowIndex === i && x.targetLang === lang);
+      const res = idx.get(i + '|' + lang);
       if (!res) m++;
       else if (needsRetranslate(res)) r++;
     }
